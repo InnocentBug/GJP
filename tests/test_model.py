@@ -12,9 +12,9 @@ def test_simple_pass():
         train_jraph = convert_to_jraph(train, max_node_pad, max_edges_pad)
         test_jraph = convert_to_jraph(test, max_node_pad, max_edges_pad)
 
-        similar_train_graphs = dataset.get_similar_feature_graphs(train_jraph[0], 20)
+        dataset.get_similar_feature_graphs(train_jraph[0], 20)
         train += [train[0]] * 20
-        similar_test_graphs = dataset.get_similar_feature_graphs(test_jraph[0], 10)
+        dataset.get_similar_feature_graphs(test_jraph[0], 10)
         test += [test[0]] * 10
 
         final_node_size = 21

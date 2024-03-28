@@ -4,7 +4,6 @@ name: CI Tests
 permissions: read-all
 
 on:
-  # trunk-ignore(yamllint/empty-values)
   workflow_dispatch:
 
   push:
@@ -33,7 +32,7 @@ jobs:
 
       matrix:
         os: [ubuntu-latest]
-        python-version: [3.10, 3.11]
+        python-version: ["3.10", 3.11]
 
     steps:
       - name: Checkout
