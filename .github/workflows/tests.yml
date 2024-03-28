@@ -1,0 +1,53 @@
+# Runs all the Python SDK tests within the `tests/` directory to check our code
+
+name: CI Tests
+permissions: read-all
+
+on:
+  # trunk-ignore(yamllint/empty-values)
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+      - trunk-merge/**
+  pull_request:
+    branches:
+      - main
+      - "*"
+
+concurrency:
+  # github.workflow: name of the workflow
+  # github.event.pull_request.number || github.ref: pull request number or branch name if not a pull request
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+  # Cancel in-progress runs when a new workflow with the same group name is triggered
+  cancel-in-progress: true
+
+jobs:
+  install:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        os: [ubuntu-latest]
+        python-version: [3.10, 3.11]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: pip install CRIPT Python SDK local package
+        run: python${{ matrix.python-version }} -m pip install .
+
+      - name: pip install requirements_dev.txt
+        run: python${{ matrix.python-version }} -m pip install -r requirements_dev.txt
+
+      - name: Run pytest on tests/
+        run: python${{ matrix.python-version }} -m pytest ./tests/
