@@ -153,7 +153,6 @@ class GraphData:
     def get_test_train(self, train_size: int, test_size: int, min_nodes: int, max_nodes: int):
         all_nodes = []
         for num_nodes in range(min_nodes, max_nodes):
-            print(num_nodes)
             self.ensure_num_random_graphs(num_nodes, test_size + train_size)
             for idx in range(self.num_graphs("random", num_nodes)):
                 all_nodes.append(self.get_graph("random", num_nodes, idx))
