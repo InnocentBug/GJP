@@ -217,8 +217,10 @@ def convert_to_jraph(graphs, num_nodes_pad: int = None, num_edges_pad: int = Non
             jraph_graphs.append(graph)
     return jraph_graphs
 
+
 def get_pad_graph(graph, num_nodes_pad, num_edges_pad):
     return get_pad_graph_internal(graph.nodes.shape, graph.edges.shape, graph.globals.shape, num_nodes_pad, num_edges_pad)
+
 
 def get_pad_graph_internal(nodes_shape, edges_shape, globals_shape, num_nodes_pad, num_edges_pad):
     pad_graph = jraph.GraphsTuple(
@@ -232,6 +234,7 @@ def get_pad_graph_internal(nodes_shape, edges_shape, globals_shape, num_nodes_pa
     )
 
     return pad_graph
+
 
 def batch_list(graph_list, batch_nodes, batch_edges):
     batch_list = []
