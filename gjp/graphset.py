@@ -233,11 +233,7 @@ def get_pad_graph_internal(nodes_shape, edges_shape, globals_shape, num_nodes_pa
 
     return pad_graph
 
-def random_batch_list(graph_list, batch_nodes, batch_edges, np_rng=None):
-    tmp_list = copy.copy(graph_list)
-    if np_rng:
-        np_rng.shuffle(tmp_list)
-
+def batch_list(graph_list, batch_nodes, batch_edges):
     batch_list = []
     tmp_list = []
     num_nodes = 0
@@ -246,11 +242,8 @@ def random_batch_list(graph_list, batch_nodes, batch_edges, np_rng=None):
         if graph.nodes.shape[0] + num_nodes >= batch_nodes or graph.edges.shape[0] + num_edges >= batch_edges:
 
             batched_graph = jraph.batch(tmp_list)
-            print("batch", batched_graph.globals.shape)
             pad_graph = get_pad_graph(batched_graph, batch_nodes, batch_edges)
             batch_list.append(jraph.batch([batched_graph, pad_graph]))
-            print("batch2", batch_list[-1].globals.shape)
-
 
             tmp_list = []
             num_edges = 0
