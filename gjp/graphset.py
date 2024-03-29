@@ -217,34 +217,40 @@ def convert_to_jraph(graphs, num_nodes_pad: int = None, num_edges_pad: int = Non
             jraph_graphs.append(graph)
     return jraph_graphs
 
-
 def get_pad_graph(graph, num_nodes_pad, num_edges_pad):
+    return get_pad_graph_internal(graph.nodes.shape, graph.edges.shape, graph.globals.shape, num_nodes_pad, num_edges_pad)
+
+def get_pad_graph_internal(nodes_shape, edges_shape, globals_shape, num_nodes_pad, num_edges_pad):
     pad_graph = jraph.GraphsTuple(
-        nodes=jnp.zeros((num_nodes_pad - graph.nodes.shape[0],) + graph.nodes.shape[1:]),
-        edges=jnp.zeros((num_edges_pad - graph.edges.shape[0],) + graph.edges.shape[1:]),
-        senders=jnp.zeros(num_edges_pad - graph.senders.shape[0], dtype=int),
-        receivers=jnp.zeros(num_edges_pad - graph.receivers.shape[0], dtype=int),
-        n_node=jnp.asarray([num_nodes_pad - graph.nodes.shape[0]]),
-        n_edge=jnp.asarray([num_edges_pad - graph.edges.shape[0]]),
-        globals=jnp.zeros(graph.globals.shape),
+        nodes=jnp.zeros((num_nodes_pad - nodes_shape[0],) + nodes_shape[1:]),
+        edges=jnp.zeros((num_edges_pad - edges_shape[0],) + edges_shape[1:]),
+        senders=jnp.zeros(num_edges_pad - edges_shape[0], dtype=int),
+        receivers=jnp.zeros(num_edges_pad - edges_shape[0], dtype=int),
+        n_node=jnp.asarray([num_nodes_pad - nodes_shape[0]]),
+        n_edge=jnp.asarray([num_edges_pad - edges_shape[0]]),
+        globals=jnp.zeros((1,) + globals_shape[1:]),
     )
 
     return pad_graph
 
-
-def get_batched(graph_list, batch_nodes, batch_edges, np_rng):
+def random_batch_list(graph_list, batch_nodes, batch_edges, np_rng=None):
     tmp_list = copy.copy(graph_list)
-    np_rng.shuffle(tmp_list)
+    if np_rng:
+        np_rng.shuffle(tmp_list)
+
     batch_list = []
     tmp_list = []
     num_nodes = 0
     num_edges = 0
     for graph in graph_list:
-        if graph.nodes.shape[0] + num_nodes >= batch_nodes or graph.edges.nodes.shape[0] + num_edges >= batch_edges:
+        if graph.nodes.shape[0] + num_nodes >= batch_nodes or graph.edges.shape[0] + num_edges >= batch_edges:
 
             batched_graph = jraph.batch(tmp_list)
+            print("batch", batched_graph.globals.shape)
             pad_graph = get_pad_graph(batched_graph, batch_nodes, batch_edges)
             batch_list.append(jraph.batch([batched_graph, pad_graph]))
+            print("batch2", batch_list[-1].globals.shape)
+
 
             tmp_list = []
             num_edges = 0
@@ -258,4 +264,5 @@ def get_batched(graph_list, batch_nodes, batch_edges, np_rng):
         batched_graph = jraph.batch(tmp_list)
         pad_graph = get_pad_graph(batched_graph, batch_nodes, batch_edges)
         batch_list.append(jraph.batch([batched_graph, pad_graph]))
-    return
+
+    return batch_list
