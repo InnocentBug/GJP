@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import jraph
 import networkx as nx
 import numpy as np
+import tqdm
 
 
 class GraphData:
@@ -89,10 +90,21 @@ class GraphData:
 
         return not found_isomorph
 
-    def ensure_num_random_graphs(self, num_nodes, n_graphs):
+    def ensure_num_random_graphs(self, num_nodes, n_graphs, max_attempts=25):
         self._ensure_working_shelf(num_nodes)
+        counter = 0
+        last_num = self.num_graphs("random", num_nodes)
         while self.num_graphs("random", num_nodes) < n_graphs:
             self.generate_random_directed_graph(num_nodes)
+            if last_num == self.num_graphs("random", num_nodes):
+                counter += 1
+                if counter > max_attempts:
+                    return False
+            else:
+                last_num = self.num_graphs("random", num_nodes)
+                counter = 0
+
+        return True
 
     def generate_similar_directed_graph(self, num_nodes):
         self._ensure_working_shelf(num_nodes)
@@ -138,10 +150,34 @@ class GraphData:
 
         return not found_isomorph
 
-    def ensure_num_similar_graphs(self, num_nodes, n_graphs):
+    def generate_directed_graph(self, mode, num_nodes):
+        if mode == "random":
+            return self.generate_random_directed_graph(num_nodes)
+        if mode == "similar":
+            return self.generate_similar_directed_graph(num_nodes)
+        return False
+
+    def ensure_num_similar_graphs(self, num_nodes, n_graphs, max_attempts=25):
         self._ensure_working_shelf(num_nodes)
+        last_num = self.num_graphs("similar", num_nodes)
+        counter = 0
         while self.num_graphs("similar", num_nodes) < n_graphs:
             self.generate_similar_directed_graph(num_nodes)
+            if last_num == self.num_graphs("similar", num_nodes):
+                counter += 1
+                if counter >= max_attempts:
+                    return False
+            else:
+                counter = 0
+                last_num = self.num_graphs("similar", num_nodes)
+        return True
+
+    def ensure_num_graphs(self, mode, num_nodes, n_graphs, max_attempts=25):
+        if mode == "random":
+            return self.ensure_num_random_graphs(num_nodes, n_graphs, max_attempts)
+        if mode == "similar":
+            return self.ensure_num_similar_graphs(num_nodes, n_graphs, max_attempts)
+        return False
 
     def get_graph(self, mode: str, num_nodes, idx):
         return self._shelve_handle[mode][str(num_nodes)][idx]
@@ -151,19 +187,25 @@ class GraphData:
         return len(self._shelve_handle[mode][str(num_nodes)])
 
     def get_test_train(self, train_size: int, test_size: int, min_nodes: int, max_nodes: int):
-        all_nodes = []
-        for num_nodes in range(min_nodes, max_nodes):
-            self.ensure_num_random_graphs(num_nodes, test_size + train_size)
-            for idx in range(self.num_graphs("random", num_nodes)):
-                all_nodes.append(self.get_graph("random", num_nodes, idx))
+        all_graphs = []
+        node_count = {"random": np.zeros(max_nodes - min_nodes, dtype=int), "similar": np.zeros(max_nodes - min_nodes, dtype=int)}
 
-            self.ensure_num_similar_graphs(num_nodes, test_size + train_size)
-            for idx in range(self.num_graphs("similar", num_nodes)):
-                all_nodes.append(self.get_graph("similar", num_nodes, idx))
+        with tqdm.tqdm(total=train_size + test_size) as pbar:
+            while len(all_graphs) < train_size + test_size:
+                num_nodes = self._np_rng.integers(min_nodes, max_nodes)
+                if self._np_rng.integers(2) == 0:
+                    mode = "random"
+                else:
+                    mode = "similar"
 
-        self._np_rng.shuffle(all_nodes)
+                if self.ensure_num_graphs(mode, num_nodes, node_count[mode][num_nodes - min_nodes] + 1):
+                    all_graphs.append(self.get_graph(mode, num_nodes, node_count[mode][num_nodes - min_nodes]))
+                    node_count[mode][num_nodes - min_nodes] += 1
+                    pbar.update(1)
 
-        return all_nodes[:train_size], all_nodes[train_size : train_size + test_size]
+        self._np_rng.shuffle(all_graphs)
+
+        return all_graphs[:train_size], all_graphs[train_size : train_size + test_size]
 
     def get_similar_feature_graphs(self, jraph_graph, num_graphs):
         similar_graphs = []
