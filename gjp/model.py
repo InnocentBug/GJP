@@ -6,22 +6,13 @@ import jraph
 from flax import linen as nn
 
 
-@jax.jit
+# @jax.jit
 def split_and_sum(array, indices):
-    # Ensure indices are sorted
-    indices = jnp.sort(indices)
+    cumsum = jnp.cumsum(array, axis=0)
+    end_cums = cumsum[jnp.cumsum(indices) - 1]
 
-    # Create an array of segment IDs
-    segment_ids = jnp.zeros(array.shape[0], dtype=jnp.int32)
-    segment_ids = segment_ids.at[indices[:-1]].set(1)
-    segment_ids = jnp.cumsum(segment_ids)
-
-    # Calculate the segment sums
-    segment_sums = jnp.zeros((len(indices),) + array.shape[1:])
-    for i in range(len(indices)):
-        mask = segment_ids == i
-        segment_sums = segment_sums.at[i].set(jnp.sum(array * mask[:, None], axis=0))
-    return segment_sums
+    diff_out_results = jnp.diff(end_cums, prepend=0, axis=0)
+    return diff_out_results
 
 
 class MLP(nn.Module):
@@ -112,11 +103,11 @@ class MessagePassingLayer(nn.Module):
         summed_edge_features = split_and_sum(graph.edges, graph.n_edge)
 
         tmp_node_global = global_node_mlp_vmap(summed_node_features)
-        tmp_edge_global = global_edge_mlp_vmap(summed_edge_features)
+        global_edge_mlp_vmap(summed_edge_features)
 
         tmp_global = global_mlp_vmap(global_features)
 
-        new_global = tmp_global + tmp_node_global + tmp_edge_global
+        new_global = tmp_global + tmp_node_global  # + tmp_edge_global
 
         out_graph = graph._replace(nodes=new_nodes, edges=new_edges, globals=new_global)
         return out_graph
