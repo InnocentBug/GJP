@@ -103,7 +103,7 @@ class MessagePassingLayer(nn.Module):
         summed_edge_features = split_and_sum(graph.edges, graph.n_edge)
 
         tmp_node_global = global_node_mlp_vmap(summed_node_features)
-        tmp_edge_global = global_edge_mlp_vmap(summed_edge_features)
+        global_edge_mlp_vmap(summed_edge_features)
 
         tmp_global = global_mlp_vmap(global_features)
 
