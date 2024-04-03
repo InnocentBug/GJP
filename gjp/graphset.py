@@ -1,6 +1,7 @@
 import copy
 import shelve
 import time
+from functools import partial
 from typing import Optional
 
 import jax
@@ -242,7 +243,9 @@ def convert_to_jraph(graphs, num_nodes_pad: int = None, num_edges_pad: int = Non
         if num_nodes_pad and len(nx_graph) >= num_nodes_pad:
             raise RuntimeError("Number of nodes larger then request pad size for nodes.")
         node_features = jnp.zeros((len(nx_graph), 1))
-        global_context = jnp.array([[1]])
+
+        global_context = jnp.array([[0]])
+
         graph = jraph.GraphsTuple(
             nodes=jnp.asarray(node_features),
             edges=jnp.asarray(edges).reshape(len(edges), 1),
@@ -258,6 +261,53 @@ def convert_to_jraph(graphs, num_nodes_pad: int = None, num_edges_pad: int = Non
         else:
             jraph_graphs.append(graph)
     return jraph_graphs
+
+
+def calc_slices(array):
+    ends = jnp.cumsum(array)
+    start = jnp.concatenate([jnp.zeros(1), ends[:-1]])
+    return jnp.vstack([start, ends]).transpose()
+
+
+def apply_unique(array, n_edge, max_num_nodes):
+    slices = calc_slices(n_edge)
+    # Create a boolean array representing the slice ranges
+    arange_slice = jnp.repeat(jnp.arange(array.shape[0]).reshape((array.shape[0], 1)), slices.shape[0], axis=1)
+
+    slice_ranges = arange_slice < slices[:, 1]
+    slice_ranges &= arange_slice >= slices[:, 0]
+
+    repeat_array = jnp.repeat(array.reshape(array.shape[0], 1), slices.shape[0], axis=1)
+    masked_array = jnp.where(slice_ranges, repeat_array, -1)
+
+    def inner(inner_array):
+        unique_elements, counts = jnp.unique(inner_array, size=max_num_nodes, return_counts=True, fill_value=-2)
+        masked_counts = jnp.where(unique_elements > 0, counts, jnp.nan)
+        clipped_uniq = jnp.clip(unique_elements + 0.5, 0.2, 1.2) - 0.2
+
+        return jnp.sum(clipped_uniq), jnp.nanmean(masked_counts)
+
+    vmap_inner = jax.vmap(inner)
+    # Apply jnp.unique to the masked array
+    unique_elements, counts = vmap_inner(masked_array.transpose())
+
+    return unique_elements, counts
+
+
+def change_global_jraph_to_props_inner(graph, max_num_nodes):
+    send_uniq, send_avg = apply_unique(graph.senders, graph.n_edge, max_num_nodes)
+    rec_uniq, rec_avg = apply_unique(graph.receivers, graph.n_edge, max_num_nodes)
+    new_globals = jnp.vstack([send_uniq, send_uniq, rec_uniq, rec_avg, graph.n_node, graph.n_edge]).transpose()
+    return graph._replace(globals=new_globals)
+
+
+def change_global_jraph_to_props(graphs, max_num_nodes):
+    new_graphs = []
+    change_inner = partial(change_global_jraph_to_props_inner, max_num_nodes=max_num_nodes)
+    jit_change_inner = jax.jit(change_inner)
+    for graph in graphs:
+        new_graphs.append(jit_change_inner(graph))
+    return new_graphs
 
 
 def get_pad_graph(graph, num_nodes_pad, num_edges_pad):

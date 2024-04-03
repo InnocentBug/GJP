@@ -2,7 +2,14 @@ import jax
 import numpy as np
 import optax
 
-from gjp import GraphData, MessagePassing, batch_list, convert_to_jraph, metric_util
+from gjp import (
+    GraphData,
+    MessagePassing,
+    batch_list,
+    change_global_jraph_to_props,
+    convert_to_jraph,
+    metric_util,
+)
 
 
 def test_small_metric_model():
@@ -25,7 +32,7 @@ def test_small_metric_model():
         test_jraph += similar_test_graphs
 
         # Batch the test into a single graph
-        batch_test = batch_list(test_jraph, node_batch_size, edge_batch_size)
+        batch_test = change_global_jraph_to_props(batch_list(test_jraph, node_batch_size, edge_batch_size), node_batch_size)
         assert len(batch_test) == 1
         batch_test = batch_test[0]
 
@@ -34,7 +41,7 @@ def test_small_metric_model():
         num_batch_shuffle = 2
         batch_shuffles = []
         for _ in range(num_batch_shuffle):
-            batched_train_data = batch_list(train_jraph, node_batch_size, edge_batch_size)
+            batched_train_data = change_global_jraph_to_props(batch_list(train_jraph, node_batch_size, edge_batch_size), node_batch_size)
             assert len(batched_train_data) > 1
             batch_shuffles.append(batched_train_data)
             np_rng.shuffle(train_jraph)
