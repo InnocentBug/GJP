@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import jraph
 import networkx as nx
 import optax
+from flax import linen as nn
 from networkx.drawing.nx_pydot import to_pydot
 
 
@@ -41,26 +42,35 @@ def loss_function_where(params, graph, model, threshold):
     return idx
 
 
+def _loss_helper(x):
+    return 2 * (1 / (1 - nn.relu(-x + 1) + 1) - 1 / 2)
+
+
 def loss_function_combined(params, graph, model):
     out_graph = model.apply(params, graph)
     metric_embeds = out_graph.globals[:-1]
+    norms = jnp.sqrt(jnp.sum(metric_embeds**2, axis=-1))
+    metric_embeds = metric_embeds / norms[:, None]
+
     dist_matrix = jnp.sum((metric_embeds[:, None] - metric_embeds[None, :]) ** 2, axis=-1)
     clean_matrix = jnp.fill_diagonal(dist_matrix, jnp.nan, inplace=False)
 
     n = metric_embeds.shape[0]
     mean = jnp.nansum(clean_matrix) / (n * (n - 1))
 
-    return 1 / (1 + mean)
+    return _loss_helper(mean)
 
 
 def loss_function_single(params, graph, model):
     out_graph = model.apply(params, graph)
     metric_embeds = out_graph.globals[:-1]
+    norms = jnp.sqrt(jnp.sum(metric_embeds**2, axis=-1))
+    metric_embeds = metric_embeds / norms[:, None]
 
-    dist_matrix = jnp.sqrt(jnp.sum((metric_embeds[:, None] - metric_embeds[None, :]) ** 2, axis=-1))
+    dist_matrix = jnp.sum((metric_embeds[:, None] - metric_embeds[None, :]) ** 2, axis=-1)
     clean_matrix = jnp.fill_diagonal(dist_matrix, jnp.nan, inplace=False)
     mean = jnp.nanmin(clean_matrix)
-    return 1 / (1 + mean)
+    return _loss_helper(mean)
 
 
 def train_model(train_batch, batch_test, steps, model, params, tx, opt_state):
@@ -74,21 +84,23 @@ def train_model(train_batch, batch_test, steps, model, params, tx, opt_state):
 
     @jax.jit
     def inner(i, val):
-        params, opt_state, train_loss = val
+        params, opt_state, train_loss, train_max = val
         train_loss = 0
+        train_max = 0
         for train_graph in train_batch:
+            # Summed loss
             train_loss_val, grads = loss_grad_fn(params, train_graph)
             train_loss += train_loss_val
             updates, opt_state = tx.update(grads, opt_state)
             params = optax.apply_updates(params, updates)
-        train_loss /= len(train_batch)
-        return params, opt_state, train_loss
+            # Max loss
+            train_loss_max = jit_loss_single(params, train_graph)
+            train_max = jnp.max(jnp.array([train_max, train_loss_max]))
 
-    (
-        params,
-        opt_state,
-        train_loss,
-    ) = jax.lax.fori_loop(0, steps, inner, init_val=(params, opt_state, 0))
-    print("train loss", train_loss, jit_loss(params, batch_test), jit_loss_single(params, batch_test))
+        train_loss /= len(train_batch)
+        return params, opt_state, train_loss, train_max
+
+    (params, opt_state, train_loss, train_max) = jax.lax.fori_loop(0, steps, inner, init_val=(params, opt_state, 0, 0))
+    print("train loss", train_loss, train_max, jit_loss(params, batch_test), jit_loss_single(params, batch_test))
 
     return params, tx, opt_state
