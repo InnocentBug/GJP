@@ -108,7 +108,9 @@ class MessagePassingLayer(nn.Module):
 
         tmp_global = global_mlp_vmap(global_features)
 
-        new_global = tmp_global + tmp_node_global + tmp_edge_global
+        final_global_mlp = MLP(self.global_feature_sizes, self.dropout_rate, self.deterministic, self.activation)
+        final_args = jnp.hstack([tmp_global, tmp_node_global, tmp_edge_global])
+        new_global = final_global_mlp(final_args)
 
         out_graph = graph._replace(nodes=new_nodes, edges=new_edges, globals=new_global)
         return out_graph
