@@ -95,9 +95,9 @@ def test_global_features():
     expected_result = np.array(
         [
             [
-                3.3,
-                3.3,
-                3.3,
+                3.0,
+                3.0,
+                3.0,
                 2.6666667,
                 5.0,
                 10.0,

@@ -150,7 +150,8 @@ def run_parameter(shelf_path, mlp_stack, stepA, stepB, min_nodes=3, max_nodes=50
 
         # Batch the test into a single graph
         batch_test = change_global_jraph_to_props(batch_list(test_jraph, node_batch_size, edge_batch_size), node_batch_size)
-        print("WARNING: test set doesn't fit in a single batch")
+        if len(batch_test) != 1:
+            print("WARNING: test set doesn't fit in a single batch")
         batch_test = batch_test[0]
 
         # Use different combinations of batching the training data
@@ -180,9 +181,10 @@ def run_parameter(shelf_path, mlp_stack, stepA, stepB, min_nodes=3, max_nodes=50
             end = time.time()
             print(i, end - start)
 
-        graph_to_plot = []
+        graphs_to_plot = []
         idx = loss_function_where(params, batch_test, model, 1e-6)
         for i, j in zip(idx[0], idx[1]):
-            graph_to_plot.append((test_jraph[i], test_jraph[j]))
+            graphs_to_plot.append((test_jraph[i], test_jraph[j]))
 
-        return graph_to_plot
+        return_dict = {"model": model, "params": params, "graphs_to_plot": graphs_to_plot}
+        return return_dict

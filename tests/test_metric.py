@@ -6,7 +6,7 @@ jax.config.update("jax_platform_name", "cpu")
 
 
 def test_small_metric_model():
-    same_test_nodes = metric_util.run_parameter(
+    result = metric_util.run_parameter(
         shelf_path=".test_small_metric_model",
         mlp_stack=[[1], [4], [2]],
         stepA=2,
@@ -21,4 +21,4 @@ def test_small_metric_model():
         node_pad=100,
         edge_pad=200,
     )
-    assert len(same_test_nodes) == 0
+    assert len(result["graphs_to_plot"]) == 0
