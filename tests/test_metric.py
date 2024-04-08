@@ -57,7 +57,7 @@ def test_small_metric_model():
     node_pad = 400
     edge_pad = 600
     mlp_stack = [[1], [4], [2]]
-    model = MessagePassing(mlp_stack, mlp_stack, mlp_stack, num_nodes=node_pad)
+    model = MessagePassing(mlp_stack, mlp_stack, mlp_stack, num_nodes=node_pad, norm_global=norm)
 
     with GraphData(".test_small_metric_model") as dataset:
         train, test = dataset.get_test_train(15, 10, 7, 11)
@@ -68,7 +68,7 @@ def test_small_metric_model():
         assert len(data) == 1
         data = data[0]
 
-        idx = metric_util.loss_function_where(params, data, model, 1e-10, norm)
+        idx = metric_util.loss_function_where(params, data, model, 1e-10)
         out_graph = model.apply(params, data)
         print(out_graph.globals)
         print(jnp.sqrt(jnp.sum(out_graph.globals**2, axis=-1)))

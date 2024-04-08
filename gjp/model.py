@@ -114,8 +114,9 @@ class MessagePassingLayer(nn.Module):
         final_args = jnp.hstack([tmp_global, tmp_node_global, tmp_edge_global])
         new_global = final_global_mlp(final_args)
         if self.norm_global:
-            norms = jnp.sum(new_global**2, axis=-1) + 1e-1
-            # norms = norms + (1-norms) * jnp.exp(-norms**2)
+            norms = jnp.sum(new_global**2, axis=-1)
+            norms = norms + (1 - norms) * jnp.exp(-(norms**2))
+            norms = jnp.sqrt(norms)
             new_global = new_global / norms[:, None]
 
         out_graph = graph._replace(nodes=new_nodes, edges=new_edges, globals=new_global)
@@ -139,8 +140,6 @@ class MessagePassing(nn.Module):
             raise RuntimeError("The size of the edge, node, and global message passing stacks must be identical.")
 
         size = len(self.node_feature_sizes)
-        if self.norm_global is None:
-            self.norm_global = [False] * size
         if len(self.norm_global) != size:
             raise RuntimeError("The size of the norm has to match with the number of Message Passing Layers")
 
