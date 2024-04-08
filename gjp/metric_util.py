@@ -1,3 +1,4 @@
+import os
 import time
 from functools import partial
 
@@ -7,6 +8,7 @@ import jraph
 import networkx as nx
 import numpy as np
 import optax
+import orbax.checkpoint as ocp
 from flax import linen as nn
 from networkx.drawing.nx_pydot import to_pydot
 
@@ -44,8 +46,7 @@ def svg_graph_list(graphs, filename="graphs.svg"):
 
 def loss_function_where(params, graph, model, threshold):
     out_graph = model.apply(params, graph)
-    props = change_global_jraph_to_props_inner(graph, model.num_nodes)
-    metric_embeds = jnp.hstack([out_graph.globals, props])[:-1]
+    metric_embeds = out_graph.globals[:-1]
 
     dist_matrix = jnp.sqrt(jnp.sum((metric_embeds[:, None] - metric_embeds[None, :]) ** 2, axis=-1))
     clean_matrix = jnp.fill_diagonal(dist_matrix, jnp.nan, inplace=False)
@@ -116,7 +117,9 @@ def train_model(train_batch, batch_test, steps, model, params, tx, opt_state):
     return params, tx, opt_state
 
 
-def run_parameter(shelf_path, mlp_stack, stepA, stepB, min_nodes=3, max_nodes=50, train_size=2500, test_size=500, extra_feature=5, num_batch_shuffle=5, seed=None, node_pad=10000, edge_pad=20000, learning_rate=1e-2):
+def run_parameter(
+    shelf_path, mlp_stack, stepA, stepB, min_nodes=3, max_nodes=50, train_size=2500, test_size=500, extra_feature=5, num_batch_shuffle=5, seed=None, node_pad=20000, edge_pad=40000, learning_rate=1e-2, checkpoint_path=None, checkpoint_every=None
+):
 
     print("shelf_path", shelf_path)
     print("mlp_stack", mlp_stack)
@@ -132,6 +135,10 @@ def run_parameter(shelf_path, mlp_stack, stepA, stepB, min_nodes=3, max_nodes=50
     print("node_pad", node_pad)
     print("edge_pad", edge_pad)
     print("learning_rate", learning_rate)
+    print("checkpoint_every", checkpoint_every)
+    print("checkpoint_path", checkpoint_path)
+
+    orbax_checkpointer = ocp.StandardCheckpointer()
 
     with GraphData(shelf_path, seed=seed) as dataset:
         train, test = dataset.get_test_train(train_size, test_size, min_nodes, max_nodes)
@@ -149,7 +156,8 @@ def run_parameter(shelf_path, mlp_stack, stepA, stepB, min_nodes=3, max_nodes=50
         test_jraph += similar_test_graphs
 
         # Batch the test into a single graph
-        batch_test = change_global_jraph_to_props(batch_list(test_jraph, node_batch_size, edge_batch_size), node_batch_size)
+        batch_test = batch_list(test_jraph, node_batch_size, edge_batch_size)
+        # batch_test = change_global_jraph_to_props(batch_test, node_batch_size)
         if len(batch_test) != 1:
             print("WARNING: test set doesn't fit in a single batch")
         batch_test = batch_test[0]
@@ -158,7 +166,9 @@ def run_parameter(shelf_path, mlp_stack, stepA, stepB, min_nodes=3, max_nodes=50
         np_rng = np.random.default_rng(seed)
         batch_shuffles = []
         for _ in range(num_batch_shuffle):
-            batched_train_data = change_global_jraph_to_props(batch_list(train_jraph, node_batch_size, edge_batch_size), node_batch_size)
+            batched_train_data = batch_list(train_jraph, node_batch_size, edge_batch_size)
+            # batched_train_data = change_global_jraph_to_props(batched_train_data, node_batch_size)
+
             batch_shuffles.append(batched_train_data)
             np_rng.shuffle(train_jraph)
 
@@ -176,11 +186,15 @@ def run_parameter(shelf_path, mlp_stack, stepA, stepB, min_nodes=3, max_nodes=50
 
         # Learning loop
         for i in range(stepA):
+            if checkpoint_path and checkpoint_every and i % checkpoint_every == 0:
+                orbax_checkpointer.save(os.path.abspath(checkpoint_path + f"{i}"), params)
+
             start = time.time()
             params, tx, opt_state = train_model(batch_shuffles[i % num_batch_shuffle], batch_test, stepB, model, params, tx, opt_state)
             end = time.time()
             print(i, end - start)
 
+        return params
         graphs_to_plot = []
         idx = loss_function_where(params, batch_test, model, 1e-6)
         for i, j in zip(idx[0], idx[1]):

@@ -1,12 +1,12 @@
 import jax
 
-from gjp import metric_util
+from gjp import GraphData, MessagePassing, batch_list, convert_to_jraph, metric_util
 
 jax.config.update("jax_platform_name", "cpu")
 
 
 def test_small_metric_model():
-    result = metric_util.run_parameter(
+    params = metric_util.run_parameter(
         shelf_path=".test_small_metric_model",
         mlp_stack=[[1], [4], [2]],
         stepA=2,
@@ -20,5 +20,27 @@ def test_small_metric_model():
         seed=None,
         node_pad=100,
         edge_pad=200,
+        checkpoint_path="./",
+        checkpoint_every=1,
     )
-    assert len(result["graphs_to_plot"]) == 0
+
+    # Validating run
+    node_pad = 400
+    edge_pad = 600
+    mlp_stack = [[1], [4], [2]]
+    model = MessagePassing(mlp_stack, mlp_stack, mlp_stack, num_nodes=node_pad)
+
+    with GraphData(".test_small_metric_model") as dataset:
+        train, test = dataset.get_test_train(15, 10, 7, 11)
+        data = convert_to_jraph(train + test)
+        similar_data = dataset.get_similar_feature_graphs(data[0], 5)
+        data = batch_list(data + similar_data, node_pad, edge_pad)
+
+        assert len(data) == 1
+        data = data[0]
+
+        idx = metric_util.loss_function_where(params, data, model, 1e-8)
+        for i, j in zip(idx[0], idx[1]):
+            out_graph = model.apply(params, data)
+            print(i, j, out_graph.globals[i], out_graph.globals[j], out_graph.n_node[i], out_graph.n_node[j])
+        assert len(idx[0]) == 0
