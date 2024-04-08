@@ -1,4 +1,4 @@
-from typing import Callable, Sequence
+from typing import Callable, List, Optional, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -22,6 +22,7 @@ class MLP(nn.Module):
     dropout_rate: float = 0
     deterministic: bool = True
     activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    norm_global: bool = False
 
     @nn.compact
     def __call__(self, inputs):
@@ -39,6 +40,7 @@ class MessagePassingLayer(nn.Module):
     edge_feature_sizes: Sequence[int]
     global_feature_sizes: Sequence[int]
     num_nodes: int = None
+    norm_global: bool = False
     activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
     dropout_rate: float = 0
     deterministic: bool = True
@@ -111,6 +113,10 @@ class MessagePassingLayer(nn.Module):
         final_global_mlp = MLP(self.global_feature_sizes, self.dropout_rate, self.deterministic, self.activation)
         final_args = jnp.hstack([tmp_global, tmp_node_global, tmp_edge_global])
         new_global = final_global_mlp(final_args)
+        if self.norm_global:
+            norms = jnp.sum(new_global**2, axis=-1) + 1e-1
+            # norms = norms + (1-norms) * jnp.exp(-norms**2)
+            new_global = new_global / norms[:, None]
 
         out_graph = graph._replace(nodes=new_nodes, edges=new_edges, globals=new_global)
         return out_graph
@@ -120,6 +126,7 @@ class MessagePassing(nn.Module):
     node_feature_sizes: Sequence[Sequence[int]]
     edge_feature_sizes: Sequence[Sequence[int]]
     global_feature_sizes: Sequence[Sequence[int]]
+    norm_global: Optional[List[bool]] = None
     num_nodes: int = None
     activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
     dropout_rate: float = 0
@@ -132,8 +139,22 @@ class MessagePassing(nn.Module):
             raise RuntimeError("The size of the edge, node, and global message passing stacks must be identical.")
 
         size = len(self.node_feature_sizes)
+        if self.norm_global is None:
+            self.norm_global = [False] * size
+        if len(self.norm_global) != size:
+            raise RuntimeError("The size of the norm has to match with the number of Message Passing Layers")
+
         self.msg_layers = [
-            MessagePassingLayer(self.node_feature_sizes[i], self.edge_feature_sizes[i], self.global_feature_sizes[i], activation=self.activation, dropout_rate=self.dropout_rate, deterministic=self.deterministic, num_nodes=self.num_nodes)
+            MessagePassingLayer(
+                self.node_feature_sizes[i],
+                self.edge_feature_sizes[i],
+                self.global_feature_sizes[i],
+                activation=self.activation,
+                dropout_rate=self.dropout_rate,
+                deterministic=self.deterministic,
+                num_nodes=self.num_nodes,
+                norm_global=self.norm_global[i],
+            )
             for i in range(size)
         ]
 

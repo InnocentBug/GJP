@@ -12,13 +12,7 @@ import orbax.checkpoint as ocp
 from flax import linen as nn
 from networkx.drawing.nx_pydot import to_pydot
 
-from .graphset import (
-    GraphData,
-    batch_list,
-    change_global_jraph_to_props,
-    change_global_jraph_to_props_inner,
-    convert_to_jraph,
-)
+from .graphset import GraphData, batch_list, convert_to_jraph
 from .model import MessagePassing
 
 
@@ -44,6 +38,10 @@ def svg_graph_list(graphs, filename="graphs.svg"):
     pydot_graph.write_svg(filename)
 
 
+def _loss_helper(x):
+    return (jnp.exp(nn.relu(-x + 1)) - 1) / (jnp.exp(1) - 1) * 100
+
+
 def loss_function_where(params, graph, model, threshold):
     out_graph = model.apply(params, graph)
     metric_embeds = out_graph.globals[:-1]
@@ -53,10 +51,6 @@ def loss_function_where(params, graph, model, threshold):
 
     idx = jnp.where(clean_matrix < threshold)
     return idx
-
-
-def _loss_helper(x):
-    return (jnp.exp(nn.relu(-x + 1)) - 1) / (jnp.exp(1) - 1) * 100
 
 
 def loss_function_combined(params, graph, model):
@@ -85,7 +79,6 @@ def loss_function_single(params, graph, model):
 
 
 def train_model(train_batch, batch_test, steps, model, params, tx, opt_state):
-
     train_loss = partial(loss_function_combined, model=model)
     test_loss = partial(loss_function_single, model=model)
 
@@ -118,7 +111,25 @@ def train_model(train_batch, batch_test, steps, model, params, tx, opt_state):
 
 
 def run_parameter(
-    shelf_path, mlp_stack, stepA, stepB, min_nodes=3, max_nodes=50, train_size=2500, test_size=500, extra_feature=5, num_batch_shuffle=5, seed=None, node_pad=20000, edge_pad=40000, learning_rate=1e-2, checkpoint_path=None, checkpoint_every=None
+    shelf_path,
+    mlp_stack,
+    stepA,
+    stepB,
+    min_nodes=3,
+    max_nodes=50,
+    train_size=2500,
+    test_size=500,
+    extra_feature=5,
+    num_batch_shuffle=5,
+    seed=None,
+    node_pad=20000,
+    edge_pad=40000,
+    learning_rate=1e-2,
+    checkpoint_path=None,
+    checkpoint_every=None,
+    norm=None,
+    from_checkpoint=False,
+    epoch_offset: int = 0,
 ):
 
     print("shelf_path", shelf_path)
@@ -137,8 +148,13 @@ def run_parameter(
     print("learning_rate", learning_rate)
     print("checkpoint_every", checkpoint_every)
     print("checkpoint_path", checkpoint_path)
+    print("from_checkpoint", from_checkpoint)
+    print("epoch_offset", epoch_offset)
+    print("norm", norm)
+    if not norm:
+        norm = [False] * len(mlp_stack)
 
-    orbax_checkpointer = ocp.StandardCheckpointer()
+    orbax_checkpointer = ocp.PyTreeCheckpointer()
 
     with GraphData(shelf_path, seed=seed) as dataset:
         train, test = dataset.get_test_train(train_size, test_size, min_nodes, max_nodes)
@@ -176,29 +192,28 @@ def run_parameter(
         edge_stack = mlp_stack
         global_stack = mlp_stack
 
-        model = MessagePassing(edge_stack, node_stack, global_stack, num_nodes=node_batch_size)
+        model = MessagePassing(edge_stack, node_stack, global_stack, num_nodes=node_batch_size, norm_global=norm)
         rng = jax.random.key(np_rng.integers(50000))
         rng, init_rng = jax.random.split(rng)
-        params = model.init(init_rng, batch_test)
+        if not from_checkpoint:
+            params = model.init(init_rng, batch_test)
+        else:
+            params = orbax_checkpointer.restore(os.path.abspath(from_checkpoint))
 
         tx = optax.adam(learning_rate=learning_rate)
         opt_state = tx.init(params)
 
         # Learning loop
         for i in range(stepA):
-            if checkpoint_path and checkpoint_every and i % checkpoint_every == 0:
-                orbax_checkpointer.save(os.path.abspath(checkpoint_path + f"{i}"), params)
+            if checkpoint_path and checkpoint_every and (epoch_offset + i) % checkpoint_every == 0:
+                orbax_checkpointer.save(os.path.abspath(checkpoint_path + f"{epoch_offset+i}"), params)
 
             start = time.time()
             params, tx, opt_state = train_model(batch_shuffles[i % num_batch_shuffle], batch_test, stepB, model, params, tx, opt_state)
             end = time.time()
-            print(i, end - start)
+            print(i + epoch_offset, end - start)
+
+        if checkpoint_path:
+            orbax_checkpointer.save(os.path.abspath(checkpoint_path + f"{epoch_offset+stepA}"), params)
 
         return params
-        graphs_to_plot = []
-        idx = loss_function_where(params, batch_test, model, 1e-6)
-        for i, j in zip(idx[0], idx[1]):
-            graphs_to_plot.append((test_jraph[i], test_jraph[j]))
-
-        return_dict = {"model": model, "params": params, "graphs_to_plot": graphs_to_plot}
-        return return_dict
