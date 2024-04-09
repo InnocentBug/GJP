@@ -39,7 +39,8 @@ def svg_graph_list(graphs, filename="graphs.svg"):
 
 
 def _loss_helper(x):
-    return (jnp.exp(nn.relu(-x + 1)) - 1) / (jnp.exp(1) - 1) * 100
+    # return (jnp.exp(nn.relu(-x + 1)) - 1) / (jnp.exp(1) - 1) * 100
+    return jnp.exp(-x * 2) * 100
 
 
 def loss_function_where(params, graph, model, threshold):
@@ -78,13 +79,7 @@ def loss_function_single(params, graph, model):
     return _loss_helper(mean)
 
 
-def train_model(train_batch, batch_test, steps, model, params, tx, opt_state):
-    train_loss = partial(loss_function_combined, model=model)
-    test_loss = partial(loss_function_single, model=model)
-
-    jit_loss = jax.jit(train_loss)
-    jit_loss_single = jax.jit(test_loss)
-    loss_grad_fn = jax.jit(jax.value_and_grad(train_loss))
+def train_model(train_batch, batch_test, steps, loss_grad_fn, jit_loss, jit_loss_single, params, tx, opt_state):
 
     @jax.jit
     def inner(i, val):
@@ -203,13 +198,20 @@ def run_parameter(
         tx = optax.adam(learning_rate=learning_rate)
         opt_state = tx.init(params)
 
+        train_loss = partial(loss_function_combined, model=model)
+        test_loss = partial(loss_function_single, model=model)
+
+        jit_loss = jax.jit(train_loss)
+        jit_loss_single = jax.jit(test_loss)
+        loss_grad_fn = jax.jit(jax.value_and_grad(train_loss))
+
         # Learning loop
         for i in range(stepA):
             if checkpoint_path and checkpoint_every and (epoch_offset + i) % checkpoint_every == 0:
                 orbax_checkpointer.save(os.path.abspath(checkpoint_path + f"{epoch_offset+i}"), params)
 
             start = time.time()
-            params, tx, opt_state = train_model(batch_shuffles[i % num_batch_shuffle], batch_test, stepB, model, params, tx, opt_state)
+            params, tx, opt_state = train_model(batch_shuffles[i % num_batch_shuffle], batch_test, stepB, loss_grad_fn, jit_loss, jit_loss_single, params, tx, opt_state)
             end = time.time()
             print(i + epoch_offset, end - start)
 

@@ -127,7 +127,7 @@ class MessagePassing(nn.Module):
     node_feature_sizes: Sequence[Sequence[int]]
     edge_feature_sizes: Sequence[Sequence[int]]
     global_feature_sizes: Sequence[Sequence[int]]
-    norm_global: Optional[List[bool]] = None
+    norm_global: List[bool]
     num_nodes: int = None
     activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
     dropout_rate: float = 0
