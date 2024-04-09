@@ -31,6 +31,8 @@ class MLP(nn.Module):
             x = nn.Dense(features=size)(x)
             x = self.activation(x)
             x = nn.Dropout(rate=self.dropout_rate, deterministic=self.deterministic)(x)
+            if self.norm_global:
+                x = nn.BatchNorm(use_running_average=True)(x)
         return x
 
 
@@ -110,14 +112,14 @@ class MessagePassingLayer(nn.Module):
 
         tmp_global = global_mlp_vmap(global_features)
 
-        final_global_mlp = MLP(self.global_feature_sizes, self.dropout_rate, self.deterministic, self.activation)
+        final_global_mlp = MLP(self.global_feature_sizes, self.dropout_rate, self.deterministic, self.activation, norm_global=self.norm_global)
         final_args = jnp.hstack([tmp_global, tmp_node_global, tmp_edge_global])
         new_global = final_global_mlp(final_args)
-        if self.norm_global:
-            norms = jnp.sum(new_global**2, axis=-1)
-            norms = norms + (1 - norms) * jnp.exp(-(norms**2))
-            norms = jnp.sqrt(norms)
-            new_global = new_global / norms[:, None]
+        # if self.norm_global:
+        #     norms = jnp.sum(new_global**2, axis=-1)
+        #     norms = norms + (1 - norms) * jnp.exp(-(norms**2))
+        #     norms = jnp.sqrt(norms)
+        #     new_global = new_global / norms[:, None]
 
         out_graph = graph._replace(nodes=new_nodes, edges=new_edges, globals=new_global)
         return out_graph
