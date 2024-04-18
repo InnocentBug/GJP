@@ -54,7 +54,7 @@ def loss_function_where(params, graph, model, threshold):
     return idx
 
 
-def loss_function_combined(params, graph, model):
+def loss_function_combined(params, graph, model, norm=False):
     out_graph = model.apply(params, graph)
     metric_embeds = out_graph.globals[:-1]
 
@@ -64,6 +64,9 @@ def loss_function_combined(params, graph, model):
     n = metric_embeds.shape[0]
     matrix_before_sum = _loss_helper(clean_matrix)
     mean = jnp.nansum(matrix_before_sum) / (n * (n - 1))
+
+    if norm:
+        mean += jnp.mean(metric_embeds**2)
 
     return mean
 
@@ -122,9 +125,9 @@ def run_parameter(
     learning_rate=1e-2,
     checkpoint_path=None,
     checkpoint_every=None,
-    norm=None,
     from_checkpoint=False,
     epoch_offset: int = 0,
+    norm: bool = None,
 ):
 
     print("shelf_path", shelf_path)
@@ -187,7 +190,7 @@ def run_parameter(
         edge_stack = mlp_stack
         global_stack = mlp_stack
 
-        model = MessagePassing(edge_stack, node_stack, global_stack, num_nodes=node_batch_size, norm_global=norm)
+        model = MessagePassing(edge_stack, node_stack, global_stack, num_nodes=node_batch_size)
         rng = jax.random.key(np_rng.integers(50000))
         rng, init_rng = jax.random.split(rng)
         if not from_checkpoint:
@@ -198,7 +201,7 @@ def run_parameter(
         tx = optax.adam(learning_rate=learning_rate)
         opt_state = tx.init(params)
 
-        train_loss = partial(loss_function_combined, model=model)
+        train_loss = partial(loss_function_combined, model=model, norm=norm)
         test_loss = partial(loss_function_single, model=model)
 
         jit_loss = jax.jit(train_loss)

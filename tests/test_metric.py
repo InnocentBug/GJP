@@ -10,7 +10,6 @@ jax.config.update("jax_platform_name", "cpu")
 
 
 def test_small_metric_model():
-    norm = [False, False, True]
     params = metric_util.run_parameter(
         shelf_path=".test_small_metric_model",
         mlp_stack=[[1], [4], [2]],
@@ -27,7 +26,7 @@ def test_small_metric_model():
         edge_pad=200,
         checkpoint_path="./",
         checkpoint_every=1,
-        norm=norm,
+        norm=False,
     )
 
     params = metric_util.run_parameter(
@@ -46,7 +45,7 @@ def test_small_metric_model():
         edge_pad=200,
         checkpoint_path="./",
         checkpoint_every=1,
-        norm=norm,
+        norm=True,
         from_checkpoint="./1",
         epoch_offset=3,
     )
@@ -57,7 +56,7 @@ def test_small_metric_model():
     node_pad = 400
     edge_pad = 600
     mlp_stack = [[1], [4], [2]]
-    model = MessagePassing(mlp_stack, mlp_stack, mlp_stack, num_nodes=node_pad, norm_global=norm)
+    model = MessagePassing(mlp_stack, mlp_stack, mlp_stack, num_nodes=node_pad)
 
     with GraphData(".test_small_metric_model") as dataset:
         train, test = dataset.get_test_train(15, 10, 7, 11)
