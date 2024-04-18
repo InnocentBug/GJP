@@ -9,7 +9,6 @@ import networkx as nx
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
-from flax import linen as nn
 from networkx.drawing.nx_pydot import to_pydot
 
 from .graphset import GraphData, batch_list, convert_to_jraph

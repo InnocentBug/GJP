@@ -1,4 +1,4 @@
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Sequence
 
 import jax
 import jax.numpy as jnp
