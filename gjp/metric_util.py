@@ -96,7 +96,7 @@ def train_model(train_batch, batch_test, steps, loss_grad_fn, jit_loss, jit_loss
 
         params, opt_state, train_loss, train_max = val
         print("asdf", len(train_batch))
-        (params, opt_state), return_data = jax.lax.scan(inner_inner, (params, opt_state), xs=train_batch)
+        (params, opt_state), return_data = jax.lax.scan(inner_inner, (params, opt_state), xs=train_batch, length=len(train_batch))
         return_data = jnp.asarray(return_data).transpose()
         train_loss = jnp.mean(return_data[0])
         train_max = jnp.max(return_data[1])
