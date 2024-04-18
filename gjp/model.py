@@ -121,7 +121,7 @@ class MessagePassing(nn.Module):
     edge_feature_sizes: Sequence[Sequence[int]]
     global_feature_sizes: Sequence[Sequence[int]]
     num_nodes: int = None
-    activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.sigmoid  # nn.leaky_relu
+    activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
     dropout_rate: float = 0
     deterministic: bool = True
 
@@ -132,8 +132,17 @@ class MessagePassing(nn.Module):
             raise RuntimeError("The size of the edge, node, and global message passing stacks must be identical.")
 
         size = len(self.node_feature_sizes)
+
         self.msg_layers = [
-            MessagePassingLayer(self.node_feature_sizes[i], self.edge_feature_sizes[i], self.global_feature_sizes[i], activation=self.activation, dropout_rate=self.dropout_rate, deterministic=self.deterministic, num_nodes=self.num_nodes)
+            MessagePassingLayer(
+                self.node_feature_sizes[i],
+                self.edge_feature_sizes[i],
+                self.global_feature_sizes[i],
+                activation=self.activation,
+                dropout_rate=self.dropout_rate,
+                deterministic=self.deterministic,
+                num_nodes=self.num_nodes,
+            )
             for i in range(size)
         ]
 

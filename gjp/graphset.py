@@ -283,7 +283,7 @@ def apply_unique(array, n_edge, max_num_nodes):
     def inner(inner_array):
         unique_elements, counts = jnp.unique(inner_array, size=max_num_nodes, return_counts=True, fill_value=-2)
         masked_counts = jnp.where(unique_elements > 0, counts, jnp.nan)
-        clipped_uniq = jnp.clip(unique_elements + 0.5, 0.2, 1.2) - 0.2
+        clipped_uniq = jnp.clip(unique_elements + 1, 1, 2) - 1
 
         return jnp.sum(clipped_uniq), jnp.nanmean(masked_counts)
 
@@ -298,7 +298,7 @@ def change_global_jraph_to_props_inner(graph, max_num_nodes):
     send_uniq, send_avg = apply_unique(graph.senders, graph.n_edge, max_num_nodes)
     rec_uniq, rec_avg = apply_unique(graph.receivers, graph.n_edge, max_num_nodes)
     new_globals = jnp.vstack([send_uniq, send_uniq, rec_uniq, rec_avg, graph.n_node, graph.n_edge]).transpose()
-    return graph._replace(globals=new_globals)
+    return new_globals
 
 
 def change_global_jraph_to_props(graphs, max_num_nodes):
@@ -306,7 +306,9 @@ def change_global_jraph_to_props(graphs, max_num_nodes):
     change_inner = partial(change_global_jraph_to_props_inner, max_num_nodes=max_num_nodes)
     jit_change_inner = jax.jit(change_inner)
     for graph in graphs:
-        new_graphs.append(jit_change_inner(graph))
+        new_globals = jit_change_inner(graph)
+        new_graph = graph._replace(globals=new_globals)
+        new_graphs.append(new_graph)
     return new_graphs
 
 
