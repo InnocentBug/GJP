@@ -85,20 +85,21 @@ def train_model(train_batch, batch_test, steps, loss_grad_fn, jit_loss, jit_loss
 
     @jax.jit
     def inner(i, val):
-        params, opt_state, train_loss, train_max = val
-        train_loss = 0
-        train_max = 0
-        for train_graph in train_batch:
-            # Summed loss
+        def inner_inner(carry, train_graph):
+            params, opt_state = carry
             train_loss_val, grads = loss_grad_fn(params, train_graph)
-            train_loss += train_loss_val
             updates, opt_state = tx.update(grads, opt_state)
             params = optax.apply_updates(params, updates)
             # Max loss
             train_loss_max = jit_loss_single(params, train_graph)
-            train_max = jnp.max(jnp.array([train_max, train_loss_max]))
+            return (params, opt_state), (train_loss_val, train_loss_max)
 
-        train_loss /= len(train_batch)
+        params, opt_state, train_loss, train_max = val
+        print("asdf", len(train_batch))
+        (params, opt_state), return_data = jax.lax.scan(inner_inner, (params, opt_state), xs=train_batch)
+        return_data = jnp.asarray(return_data).transpose()
+        train_loss = jnp.mean(return_data[0])
+        train_max = jnp.max(return_data[1])
         return params, opt_state, train_loss, train_max
 
     (params, opt_state, train_loss, train_max) = jax.lax.fori_loop(0, steps, inner, init_val=(params, opt_state, 0, 0))
