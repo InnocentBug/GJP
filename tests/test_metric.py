@@ -22,8 +22,6 @@ def test_small_metric_model():
         extra_feature=2,
         num_batch_shuffle=2,
         seed=None,
-        node_pad=100,
-        edge_pad=200,
         checkpoint_path="./",
         checkpoint_every=1,
         norm=False,
@@ -41,8 +39,6 @@ def test_small_metric_model():
         extra_feature=2,
         num_batch_shuffle=2,
         seed=None,
-        node_pad=100,
-        edge_pad=200,
         checkpoint_path="./",
         checkpoint_every=1,
         norm=True,
@@ -53,16 +49,14 @@ def test_small_metric_model():
     # Validating run
     checkpointer = ocp.PyTreeCheckpointer()
     params = checkpointer.restore(os.path.abspath("./1"))
-    node_pad = 400
-    edge_pad = 600
     mlp_stack = [[1], [4], [2]]
-    model = MessagePassing(mlp_stack, mlp_stack, mlp_stack, num_nodes=node_pad)
+    model = MessagePassing(mlp_stack, mlp_stack, mlp_stack)
 
     with GraphData(".test_small_metric_model") as dataset:
         train, test = dataset.get_test_train(15, 10, 7, 11)
         data = convert_to_jraph(train + test)
         similar_data = dataset.get_similar_feature_graphs(data[0], 5)
-        data = batch_list(data + similar_data, node_pad, edge_pad)
+        data = batch_list(data + similar_data, 1000, 1000)
 
         assert len(data) == 1
         data = data[0]

@@ -81,25 +81,15 @@ def loss_function_single(params, graph, model):
     return _loss_helper(mean)
 
 
-def train_model(train_batch, batch_test, steps, loss_grad_fn, jit_loss, jit_loss_single, params, tx, opt_state):
+def train_model(batch_train, batch_test, steps, loss_grad_fn, jit_loss, jit_loss_single, params, tx, opt_state):
 
     @jax.jit
-    def inner(i, val):
-        def inner_inner(carry, train_graph):
-            params, opt_state = carry
-            train_loss_val, grads = loss_grad_fn(params, train_graph)
-            updates, opt_state = tx.update(grads, opt_state)
-            params = optax.apply_updates(params, updates)
-            # Max loss
-            train_loss_max = jit_loss_single(params, train_graph)
-            return (params, opt_state), (train_loss_val, train_loss_max)
-
+    def inner(_, val):
         params, opt_state, train_loss, train_max = val
-        print("asdf", len(train_batch))
-        (params, opt_state), return_data = jax.lax.scan(inner_inner, (params, opt_state), xs=train_batch, length=len(train_batch))
-        return_data = jnp.asarray(return_data).transpose()
-        train_loss = jnp.mean(return_data[0])
-        train_max = jnp.max(return_data[1])
+        train_loss, grads = loss_grad_fn(params, batch_train)
+        updates, opt_state = tx.update(grads, opt_state)
+        params = optax.apply_updates(params, updates)
+        train_max = jit_loss_single(params, batch_train)
         return params, opt_state, train_loss, train_max
 
     (params, opt_state, train_loss, train_max) = jax.lax.fori_loop(0, steps, inner, init_val=(params, opt_state, 0, 0))
@@ -120,8 +110,6 @@ def run_parameter(
     extra_feature=5,
     num_batch_shuffle=5,
     seed=None,
-    node_pad=20000,
-    edge_pad=40000,
     learning_rate=1e-2,
     checkpoint_path=None,
     checkpoint_every=None,
@@ -141,8 +129,6 @@ def run_parameter(
     print("extra_feature", extra_feature)
     print("num_batch_shuffle", num_batch_shuffle)
     print("seed", seed)
-    print("node_pad", node_pad)
-    print("edge_pad", edge_pad)
     print("learning_rate", learning_rate)
     print("checkpoint_every", checkpoint_every)
     print("checkpoint_path", checkpoint_path)
@@ -155,9 +141,16 @@ def run_parameter(
     orbax_checkpointer = ocp.PyTreeCheckpointer()
 
     with GraphData(shelf_path, seed=seed) as dataset:
+
+        def _count_nodes_edges(graph_list):
+            num_nodes = 0
+            num_edges = 0
+            for graph in graph_list:
+                num_nodes += jnp.sum(graph.n_node)
+                num_edges += jnp.sum(graph.n_edge)
+            return num_nodes, num_edges
+
         train, test = dataset.get_test_train(train_size, test_size, min_nodes, max_nodes)
-        node_batch_size = node_pad
-        edge_batch_size = edge_pad
 
         train_jraph = convert_to_jraph(train)
         test_jraph = convert_to_jraph(test)
@@ -169,22 +162,25 @@ def run_parameter(
         train_jraph += similar_train_graphs
         test_jraph += similar_test_graphs
 
+        num_nodes_train, num_edges_train = _count_nodes_edges(train_jraph)
+        num_nodes_test, num_edges_test = _count_nodes_edges(test_jraph)
+
+        node_batch_size = max(num_nodes_train, num_nodes_test) + 1
+        edge_batch_size = max(num_edges_train, num_edges_test) + 1
+        print("node_batch_size", node_batch_size)
+        print("edge_batch_size", edge_batch_size)
+
         # Batch the test into a single graph
         batch_test = batch_list(test_jraph, node_batch_size, edge_batch_size)
         # batch_test = change_global_jraph_to_props(batch_test, node_batch_size)
         if len(batch_test) != 1:
             print("WARNING: test set doesn't fit in a single batch")
         batch_test = batch_test[0]
+        batch_train = batch_list(train_jraph, node_batch_size, edge_batch_size)
+        assert len(batch_train) == 1
+        batch_train = batch_train[0]
 
-        # Use different combinations of batching the training data
         np_rng = np.random.default_rng(seed)
-        batch_shuffles = []
-        for _ in range(num_batch_shuffle):
-            batched_train_data = batch_list(train_jraph, node_batch_size, edge_batch_size)
-            # batched_train_data = change_global_jraph_to_props(batched_train_data, node_batch_size)
-
-            batch_shuffles.append(batched_train_data)
-            np_rng.shuffle(train_jraph)
 
         node_stack = mlp_stack
         edge_stack = mlp_stack
@@ -214,7 +210,7 @@ def run_parameter(
                 orbax_checkpointer.save(os.path.abspath(checkpoint_path + f"{epoch_offset+i}"), params)
 
             start = time.time()
-            params, tx, opt_state = train_model(batch_shuffles[i % num_batch_shuffle], batch_test, stepB, loss_grad_fn, jit_loss, jit_loss_single, params, tx, opt_state)
+            params, tx, opt_state = train_model(batch_train, batch_test, stepB, loss_grad_fn, jit_loss, jit_loss_single, params, tx, opt_state)
             end = time.time()
             print(i + epoch_offset, end - start)
 
