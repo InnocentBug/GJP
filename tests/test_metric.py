@@ -1,10 +1,16 @@
 import os
 
 import jax
-import jax.numpy as jnp
 import orbax.checkpoint as ocp
 
-from gjp import GraphData, MessagePassing, batch_list, convert_to_jraph, metric_util
+from gjp import (
+    GraphData,
+    MessagePassing,
+    batch_list,
+    change_global_jraph_to_props,
+    convert_to_jraph,
+    metric_util,
+)
 
 jax.config.update("jax_platform_name", "cpu")
 
@@ -57,14 +63,13 @@ def test_small_metric_model():
         data = convert_to_jraph(train + test)
         similar_data = dataset.get_similar_feature_graphs(data[0], 5)
         data = batch_list(data + similar_data, 1000, 1000)
-
+        data = change_global_jraph_to_props(data, 1000)
         assert len(data) == 1
         data = data[0]
+        print(data.globals)
 
         idx = metric_util.loss_function_where(params, data, model, 1e-10)
         out_graph = model.apply(params, data)
-        print(out_graph.globals)
-        print(jnp.sqrt(jnp.sum(out_graph.globals**2, axis=-1)))
         for i, j in zip(idx[0], idx[1]):
             print(i, j, out_graph.globals[i], out_graph.globals[j], out_graph.n_node[i], out_graph.n_node[j])
         assert len(idx[0]) == 0

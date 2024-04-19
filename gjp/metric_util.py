@@ -11,7 +11,12 @@ import optax
 import orbax.checkpoint as ocp
 from networkx.drawing.nx_pydot import to_pydot
 
-from .graphset import GraphData, batch_list, convert_to_jraph
+from .graphset import (
+    GraphData,
+    batch_list,
+    change_global_jraph_to_props,
+    convert_to_jraph,
+)
 from .model import MessagePassing
 
 
@@ -34,7 +39,7 @@ def svg_graph_list(graphs, filename="graphs.svg"):
             nx_graphs.append(g)
     combined_graphs = nx.disjoint_union_all(nx_graphs)
     pydot_graph = to_pydot(combined_graphs)
-    pydot_graph.write_svg(filename)
+    pydot_graph.write_pdf(filename)
 
 
 def _loss_helper(x):
@@ -172,12 +177,14 @@ def run_parameter(
 
         # Batch the test into a single graph
         batch_test = batch_list(test_jraph, node_batch_size, edge_batch_size)
-        # batch_test = change_global_jraph_to_props(batch_test, node_batch_size)
-        if len(batch_test) != 1:
-            print("WARNING: test set doesn't fit in a single batch")
-        batch_test = batch_test[0]
+        batch_test = change_global_jraph_to_props(batch_test, node_batch_size)
+
         batch_train = batch_list(train_jraph, node_batch_size, edge_batch_size)
-        assert len(batch_train) == 1
+        batch_train = change_global_jraph_to_props(batch_train, node_batch_size)
+
+        if len(batch_test) != 1 or len(batch_train) != 1:
+            print(f"WARNING: test {len(batch_test)} or train {len(batch_train)} set doesn't fit in a single batch")
+        batch_test = batch_test[0]
         batch_train = batch_train[0]
 
         np_rng = np.random.default_rng(seed)

@@ -297,7 +297,7 @@ def apply_unique(array, n_edge, max_num_nodes):
 def change_global_jraph_to_props_inner(graph, max_num_nodes):
     send_uniq, send_avg = apply_unique(graph.senders, graph.n_edge, max_num_nodes)
     rec_uniq, rec_avg = apply_unique(graph.receivers, graph.n_edge, max_num_nodes)
-    new_globals = jnp.vstack([send_uniq, send_uniq, rec_uniq, rec_avg, graph.n_node, graph.n_edge]).transpose()
+    new_globals = jnp.vstack([send_uniq, send_avg, rec_uniq, rec_avg, graph.n_node, graph.n_edge]).transpose()
     return new_globals
 
 
