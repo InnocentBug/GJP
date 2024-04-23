@@ -224,7 +224,7 @@ class GraphData:
         return similar_graphs
 
 
-def convert_to_jraph(graphs, num_nodes_pad: int = None, num_edges_pad: int = None):
+def convert_to_jraph(graphs, num_nodes_pad: int = None, num_edges_pad: int = None, calc_global_prop: bool = False):
     try:
         iter(graphs)
     except TypeError:
@@ -244,15 +244,22 @@ def convert_to_jraph(graphs, num_nodes_pad: int = None, num_edges_pad: int = Non
             raise RuntimeError("Number of nodes larger then request pad size for nodes.")
         node_features = jnp.zeros((len(nx_graph), 1))
 
+        n_node = jnp.asarray([len(node_features)])
+        n_edge = jnp.asarray([len(senders)])
+        senders = jnp.asarray(senders, dtype=int)
+        receivers = jnp.asarray(receivers, dtype=int)
+
         global_context = jnp.array([[0]])
+        if calc_global_prop:
+            global_context = change_global_jraph_to_props_inner(senders, receivers, n_node, n_edge, jnp.sum(n_node) + 1)
 
         graph = jraph.GraphsTuple(
             nodes=jnp.asarray(node_features),
             edges=jnp.asarray(edges).reshape(len(edges), 1),
-            senders=jnp.asarray(senders, dtype=int),
-            receivers=jnp.asarray(receivers, dtype=int),
-            n_node=jnp.asarray([len(node_features)]),
-            n_edge=jnp.asarray([len(senders)]),
+            senders=senders,
+            receivers=receivers,
+            n_node=n_node,
+            n_edge=n_edge,
             globals=global_context,
         )
         if num_nodes_pad is not None and num_edges_pad is not None:
@@ -294,10 +301,10 @@ def apply_unique(array, n_edge, max_num_nodes):
     return unique_elements, counts
 
 
-def change_global_jraph_to_props_inner(graph, max_num_nodes):
-    send_uniq, send_avg = apply_unique(graph.senders, graph.n_edge, max_num_nodes)
-    rec_uniq, rec_avg = apply_unique(graph.receivers, graph.n_edge, max_num_nodes)
-    new_globals = jnp.vstack([send_uniq, send_avg, rec_uniq, rec_avg, graph.n_node, graph.n_edge]).transpose()
+def change_global_jraph_to_props_inner(senders, receivers, n_node, n_edge, max_num_nodes):
+    send_uniq, send_avg = apply_unique(senders, n_edge, max_num_nodes)
+    rec_uniq, rec_avg = apply_unique(receivers, n_edge, max_num_nodes)
+    new_globals = jnp.vstack([send_uniq, send_avg, rec_uniq, rec_avg, n_node, n_edge]).transpose()
     return new_globals
 
 
@@ -306,7 +313,7 @@ def change_global_jraph_to_props(graphs, max_num_nodes):
     change_inner = partial(change_global_jraph_to_props_inner, max_num_nodes=max_num_nodes)
     jit_change_inner = jax.jit(change_inner)
     for graph in graphs:
-        new_globals = jit_change_inner(graph)
+        new_globals = jit_change_inner(graph.senders, graph.receivers, graph.n_node, graph.n_edge)
         new_graph = graph._replace(globals=new_globals)
         new_graphs.append(new_graph)
     return new_graphs

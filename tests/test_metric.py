@@ -31,6 +31,7 @@ def test_small_metric_model():
         checkpoint_path="./",
         checkpoint_every=1,
         norm=False,
+        init_global_props=True,
     )
 
     params = metric_util.run_parameter(
@@ -50,6 +51,7 @@ def test_small_metric_model():
         norm=True,
         from_checkpoint="./1",
         epoch_offset=3,
+        init_global_props=True,
     )
 
     # Validating run
@@ -60,7 +62,7 @@ def test_small_metric_model():
 
     with GraphData(".test_small_metric_model") as dataset:
         train, test = dataset.get_test_train(15, 10, 7, 11)
-        data = convert_to_jraph(train + test)
+        data = convert_to_jraph(train + test, calc_global_prop=True)
         similar_data = dataset.get_similar_feature_graphs(data[0], 5)
         data = batch_list(data + similar_data, 1000, 1000)
         data = change_global_jraph_to_props(data, 1000)

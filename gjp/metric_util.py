@@ -11,12 +11,7 @@ import optax
 import orbax.checkpoint as ocp
 from networkx.drawing.nx_pydot import to_pydot
 
-from .graphset import (
-    GraphData,
-    batch_list,
-    change_global_jraph_to_props,
-    convert_to_jraph,
-)
+from .graphset import GraphData, batch_list, convert_to_jraph
 from .model import MessagePassing
 
 
@@ -120,7 +115,8 @@ def run_parameter(
     checkpoint_every=None,
     from_checkpoint=False,
     epoch_offset: int = 0,
-    norm: bool = None,
+    norm: bool = False,
+    init_global_props: bool = False,
 ):
 
     print("shelf_path", shelf_path)
@@ -140,6 +136,8 @@ def run_parameter(
     print("from_checkpoint", from_checkpoint)
     print("epoch_offset", epoch_offset)
     print("norm", norm)
+    print("init_global_props", init_global_props)
+
     if not norm:
         norm = [False] * len(mlp_stack)
 
@@ -157,8 +155,8 @@ def run_parameter(
 
         train, test = dataset.get_test_train(train_size, test_size, min_nodes, max_nodes)
 
-        train_jraph = convert_to_jraph(train)
-        test_jraph = convert_to_jraph(test)
+        train_jraph = convert_to_jraph(train, calc_global_prop=init_global_props)
+        test_jraph = convert_to_jraph(test, calc_global_prop=init_global_props)
 
         # Add graphs with the same architecture but different initial features
         similar_train_graphs = dataset.get_similar_feature_graphs(train_jraph[0], train_size // extra_feature)
@@ -169,7 +167,6 @@ def run_parameter(
 
         num_nodes_train, num_edges_train = _count_nodes_edges(train_jraph)
         num_nodes_test, num_edges_test = _count_nodes_edges(test_jraph)
-
         node_batch_size = max(num_nodes_train, num_nodes_test) + 1
         edge_batch_size = max(num_edges_train, num_edges_test) + 1
         print("node_batch_size", node_batch_size)
@@ -177,10 +174,7 @@ def run_parameter(
 
         # Batch the test into a single graph
         batch_test = batch_list(test_jraph, node_batch_size, edge_batch_size)
-        batch_test = change_global_jraph_to_props(batch_test, node_batch_size)
-
         batch_train = batch_list(train_jraph, node_batch_size, edge_batch_size)
-        batch_train = change_global_jraph_to_props(batch_train, node_batch_size)
 
         if len(batch_test) != 1 or len(batch_train) != 1:
             print(f"WARNING: test {len(batch_test)} or train {len(batch_train)} set doesn't fit in a single batch")
