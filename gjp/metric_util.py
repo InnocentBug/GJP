@@ -53,6 +53,23 @@ def loss_function_where(params, graph, model, threshold):
     return idx
 
 
+def loss_function_where_num(params, graph, model, num):
+    out_graph = model.apply(params, graph)
+    metric_embeds = out_graph.globals[:-1]
+
+    dist_matrix = jnp.sqrt(jnp.sum((metric_embeds[:, None] - metric_embeds[None, :]) ** 2, axis=-1))
+    clean_matrix = jnp.fill_diagonal(dist_matrix, jnp.inf, inplace=False)
+
+    argsort_flat = jnp.argsort(clean_matrix, axis=None)
+    indeces = []
+    for i in range(num):
+        idx = argsort_flat[2 * i]
+        a = int(idx // clean_matrix.shape[0])
+        b = int(idx % clean_matrix.shape[1])
+        indeces += [(a, b)]
+    return indeces
+
+
 def loss_function_combined(params, graph, model, norm=False):
     out_graph = model.apply(params, graph)
     metric_embeds = out_graph.globals[:-1]
@@ -96,6 +113,15 @@ def train_model(batch_train, batch_test, steps, loss_grad_fn, jit_loss, jit_loss
     print("train loss", train_loss, train_max, jit_loss(params, batch_test), jit_loss_single(params, batch_test))
 
     return params, tx, opt_state
+
+
+def _count_nodes_edges(graph_list):
+    num_nodes = 0
+    num_edges = 0
+    for graph in graph_list:
+        num_nodes += jnp.sum(graph.n_node)
+        num_edges += jnp.sum(graph.n_edge)
+    return num_nodes, num_edges
 
 
 def run_parameter(
@@ -144,15 +170,6 @@ def run_parameter(
     orbax_checkpointer = ocp.PyTreeCheckpointer()
 
     with GraphData(shelf_path, seed=seed) as dataset:
-
-        def _count_nodes_edges(graph_list):
-            num_nodes = 0
-            num_edges = 0
-            for graph in graph_list:
-                num_nodes += jnp.sum(graph.n_node)
-                num_edges += jnp.sum(graph.n_edge)
-            return num_nodes, num_edges
-
         train, test = dataset.get_test_train(train_size, test_size, min_nodes, max_nodes)
 
         train_jraph = convert_to_jraph(train, calc_global_prop=init_global_props)
@@ -218,4 +235,4 @@ def run_parameter(
         if checkpoint_path:
             orbax_checkpointer.save(os.path.abspath(checkpoint_path + f"{epoch_offset+stepA}"), params)
 
-        return params
+        return params, batch_train, batch_test

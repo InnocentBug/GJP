@@ -16,7 +16,7 @@ jax.config.update("jax_platform_name", "cpu")
 
 
 def test_small_metric_model():
-    params = metric_util.run_parameter(
+    params, _, _ = metric_util.run_parameter(
         shelf_path=".test_small_metric_model",
         mlp_stack=[[1], [4], [2]],
         stepA=2,
@@ -34,7 +34,7 @@ def test_small_metric_model():
         init_global_props=True,
     )
 
-    params = metric_util.run_parameter(
+    params, _, _ = metric_util.run_parameter(
         shelf_path=".test_small_metric_model",
         mlp_stack=[[1], [4], [2]],
         stepA=3,
@@ -72,6 +72,7 @@ def test_small_metric_model():
 
         idx = metric_util.loss_function_where(params, data, model, 1e-10)
         out_graph = model.apply(params, data)
+        print(out_graph.globals)
         for i, j in zip(idx[0], idx[1]):
             print(i, j, out_graph.globals[i], out_graph.globals[j], out_graph.n_node[i], out_graph.n_node[j])
         assert len(idx[0]) == 0
