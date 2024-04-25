@@ -52,13 +52,14 @@ def test_small_metric_model():
         from_checkpoint="./1",
         epoch_offset=3,
         init_global_props=True,
+        mean_instead_of_sum=True,
     )
 
     # Validating run
     checkpointer = ocp.PyTreeCheckpointer()
     params = checkpointer.restore(os.path.abspath("./1"))
     mlp_stack = [[1], [4], [2]]
-    model = MessagePassing(mlp_stack, mlp_stack, mlp_stack)
+    model = MessagePassing(mlp_stack, mlp_stack, mlp_stack, mean_instead_of_sum=True)
 
     with GraphData(".test_small_metric_model") as dataset:
         train, test = dataset.get_test_train(15, 10, 7, 11)

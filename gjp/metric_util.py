@@ -82,6 +82,7 @@ def loss_function_combined(params, graph, model, norm=False):
     mean = jnp.nansum(matrix_before_sum) / (n * (n - 1))
 
     if norm:
+        print("asdf", jnp.mean(metric_embeds**2))
         mean += jnp.mean(metric_embeds**2)
 
     return mean
@@ -143,6 +144,7 @@ def run_parameter(
     epoch_offset: int = 0,
     norm: bool = False,
     init_global_props: bool = False,
+    mean_instead_of_sum: bool = False,
 ):
 
     print("shelf_path", shelf_path)
@@ -163,6 +165,7 @@ def run_parameter(
     print("epoch_offset", epoch_offset)
     print("norm", norm)
     print("init_global_props", init_global_props)
+    print("mean_instead_of_sum", mean_instead_of_sum)
 
     if not norm:
         norm = [False] * len(mlp_stack)
@@ -204,7 +207,7 @@ def run_parameter(
         edge_stack = mlp_stack
         global_stack = mlp_stack
 
-        model = MessagePassing(edge_stack, node_stack, global_stack, num_nodes=node_batch_size)
+        model = MessagePassing(edge_stack, node_stack, global_stack, num_nodes=node_batch_size, mean_instead_of_sum=mean_instead_of_sum)
         rng = jax.random.key(np_rng.integers(50000))
         rng, init_rng = jax.random.split(rng)
         if not from_checkpoint:
