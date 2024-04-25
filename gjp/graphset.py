@@ -305,6 +305,9 @@ def change_global_jraph_to_props_inner(senders, receivers, n_node, n_edge, max_n
     send_uniq, send_avg = apply_unique(senders, n_edge, max_num_nodes)
     rec_uniq, rec_avg = apply_unique(receivers, n_edge, max_num_nodes)
     new_globals = jnp.vstack([send_uniq, send_avg, rec_uniq, rec_avg, n_node, n_edge]).transpose()
+
+    new_globals = jnp.nan_to_num(new_globals)
+
     return new_globals
 
 

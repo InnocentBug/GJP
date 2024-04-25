@@ -82,7 +82,6 @@ def loss_function_combined(params, graph, model, norm=False):
     mean = jnp.nansum(matrix_before_sum) / (n * (n - 1))
 
     if norm:
-        print("asdf", jnp.mean(metric_embeds**2))
         mean += jnp.mean(metric_embeds**2)
 
     return mean
