@@ -34,7 +34,7 @@ def svg_graph_list(graphs, filename="graphs.svg"):
             nx_graphs.append(g)
     combined_graphs = nx.disjoint_union_all(nx_graphs)
     pydot_graph = to_pydot(combined_graphs)
-    pydot_graph.write_svg(filename)
+    pydot_graph.write_pdf(filename)
 
 
 def _loss_helper(x):
@@ -51,6 +51,23 @@ def loss_function_where(params, graph, model, threshold):
 
     idx = jnp.where(clean_matrix < threshold)
     return idx
+
+
+def loss_function_where_num(params, graph, model, num):
+    out_graph = model.apply(params, graph)
+    metric_embeds = out_graph.globals[:-1]
+
+    dist_matrix = jnp.sqrt(jnp.sum((metric_embeds[:, None] - metric_embeds[None, :]) ** 2, axis=-1))
+    clean_matrix = jnp.fill_diagonal(dist_matrix, jnp.inf, inplace=False)
+
+    argsort_flat = jnp.argsort(clean_matrix, axis=None)
+    indeces = []
+    for i in range(num):
+        idx = argsort_flat[2 * i]
+        a = int(idx // clean_matrix.shape[0])
+        b = int(idx % clean_matrix.shape[1])
+        indeces += [(a, b)]
+    return indeces
 
 
 def loss_function_combined(params, graph, model, norm=False):
@@ -81,30 +98,30 @@ def loss_function_single(params, graph, model):
     return _loss_helper(mean)
 
 
-def train_model(train_batch, batch_test, steps, loss_grad_fn, jit_loss, jit_loss_single, params, tx, opt_state):
+def train_model(batch_train, batch_test, steps, loss_grad_fn, jit_loss, jit_loss_single, params, tx, opt_state):
 
     @jax.jit
-    def inner(i, val):
+    def inner(_, val):
         params, opt_state, train_loss, train_max = val
-        train_loss = 0
-        train_max = 0
-        for train_graph in train_batch:
-            # Summed loss
-            train_loss_val, grads = loss_grad_fn(params, train_graph)
-            train_loss += train_loss_val
-            updates, opt_state = tx.update(grads, opt_state)
-            params = optax.apply_updates(params, updates)
-            # Max loss
-            train_loss_max = jit_loss_single(params, train_graph)
-            train_max = jnp.max(jnp.array([train_max, train_loss_max]))
-
-        train_loss /= len(train_batch)
+        train_loss, grads = loss_grad_fn(params, batch_train)
+        updates, opt_state = tx.update(grads, opt_state)
+        params = optax.apply_updates(params, updates)
+        train_max = jit_loss_single(params, batch_train)
         return params, opt_state, train_loss, train_max
 
     (params, opt_state, train_loss, train_max) = jax.lax.fori_loop(0, steps, inner, init_val=(params, opt_state, 0, 0))
     print("train loss", train_loss, train_max, jit_loss(params, batch_test), jit_loss_single(params, batch_test))
 
     return params, tx, opt_state
+
+
+def _count_nodes_edges(graph_list):
+    num_nodes = 0
+    num_edges = 0
+    for graph in graph_list:
+        num_nodes += jnp.sum(graph.n_node)
+        num_edges += jnp.sum(graph.n_edge)
+    return num_nodes, num_edges
 
 
 def run_parameter(
@@ -119,14 +136,14 @@ def run_parameter(
     extra_feature=5,
     num_batch_shuffle=5,
     seed=None,
-    node_pad=20000,
-    edge_pad=40000,
     learning_rate=1e-2,
     checkpoint_path=None,
     checkpoint_every=None,
     from_checkpoint=False,
     epoch_offset: int = 0,
-    norm: bool = None,
+    norm: bool = False,
+    init_global_props: bool = False,
+    mean_instead_of_sum: bool = False,
 ):
 
     print("shelf_path", shelf_path)
@@ -140,14 +157,15 @@ def run_parameter(
     print("extra_feature", extra_feature)
     print("num_batch_shuffle", num_batch_shuffle)
     print("seed", seed)
-    print("node_pad", node_pad)
-    print("edge_pad", edge_pad)
     print("learning_rate", learning_rate)
     print("checkpoint_every", checkpoint_every)
     print("checkpoint_path", checkpoint_path)
     print("from_checkpoint", from_checkpoint)
     print("epoch_offset", epoch_offset)
     print("norm", norm)
+    print("init_global_props", init_global_props)
+    print("mean_instead_of_sum", mean_instead_of_sum)
+
     if not norm:
         norm = [False] * len(mlp_stack)
 
@@ -155,11 +173,9 @@ def run_parameter(
 
     with GraphData(shelf_path, seed=seed) as dataset:
         train, test = dataset.get_test_train(train_size, test_size, min_nodes, max_nodes)
-        node_batch_size = node_pad
-        edge_batch_size = edge_pad
 
-        train_jraph = convert_to_jraph(train)
-        test_jraph = convert_to_jraph(test)
+        train_jraph = convert_to_jraph(train, calc_global_prop=init_global_props)
+        test_jraph = convert_to_jraph(test, calc_global_prop=init_global_props)
 
         # Add graphs with the same architecture but different initial features
         similar_train_graphs = dataset.get_similar_feature_graphs(train_jraph[0], train_size // extra_feature)
@@ -168,28 +184,29 @@ def run_parameter(
         train_jraph += similar_train_graphs
         test_jraph += similar_test_graphs
 
+        num_nodes_train, num_edges_train = _count_nodes_edges(train_jraph)
+        num_nodes_test, num_edges_test = _count_nodes_edges(test_jraph)
+        node_batch_size = max(num_nodes_train, num_nodes_test) + 1
+        edge_batch_size = max(num_edges_train, num_edges_test) + 1
+        print("node_batch_size", node_batch_size)
+        print("edge_batch_size", edge_batch_size)
+
         # Batch the test into a single graph
         batch_test = batch_list(test_jraph, node_batch_size, edge_batch_size)
-        # batch_test = change_global_jraph_to_props(batch_test, node_batch_size)
-        if len(batch_test) != 1:
-            print("WARNING: test set doesn't fit in a single batch")
+        batch_train = batch_list(train_jraph, node_batch_size, edge_batch_size)
+
+        if len(batch_test) != 1 or len(batch_train) != 1:
+            print(f"WARNING: test {len(batch_test)} or train {len(batch_train)} set doesn't fit in a single batch")
         batch_test = batch_test[0]
+        batch_train = batch_train[0]
 
-        # Use different combinations of batching the training data
         np_rng = np.random.default_rng(seed)
-        batch_shuffles = []
-        for _ in range(num_batch_shuffle):
-            batched_train_data = batch_list(train_jraph, node_batch_size, edge_batch_size)
-            # batched_train_data = change_global_jraph_to_props(batched_train_data, node_batch_size)
-
-            batch_shuffles.append(batched_train_data)
-            np_rng.shuffle(train_jraph)
 
         node_stack = mlp_stack
         edge_stack = mlp_stack
         global_stack = mlp_stack
 
-        model = MessagePassing(edge_stack, node_stack, global_stack, num_nodes=node_batch_size)
+        model = MessagePassing(edge_stack, node_stack, global_stack, num_nodes=node_batch_size, mean_instead_of_sum=mean_instead_of_sum)
         rng = jax.random.key(np_rng.integers(50000))
         rng, init_rng = jax.random.split(rng)
         if not from_checkpoint:
@@ -213,11 +230,11 @@ def run_parameter(
                 orbax_checkpointer.save(os.path.abspath(checkpoint_path + f"{epoch_offset+i}"), params)
 
             start = time.time()
-            params, tx, opt_state = train_model(batch_shuffles[i % num_batch_shuffle], batch_test, stepB, loss_grad_fn, jit_loss, jit_loss_single, params, tx, opt_state)
+            params, tx, opt_state = train_model(batch_train, batch_test, stepB, loss_grad_fn, jit_loss, jit_loss_single, params, tx, opt_state)
             end = time.time()
             print(i + epoch_offset, end - start)
 
         if checkpoint_path:
             orbax_checkpointer.save(os.path.abspath(checkpoint_path + f"{epoch_offset+stepA}"), params)
 
-        return params
+        return params, batch_train, batch_test

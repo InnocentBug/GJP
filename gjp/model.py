@@ -15,6 +15,15 @@ def split_and_sum(array, indices):
     return diff_out_results
 
 
+# @jax.jit
+def split_and_mean(array, indices):
+    cumsum = jnp.cumsum(array, axis=0)
+    end_cums = cumsum[jnp.cumsum(indices) - 1]
+
+    diff_out_results = jnp.diff(end_cums, prepend=0, axis=0)
+    return diff_out_results / indices[:, None]
+
+
 class MLP(nn.Module):
     """A multi-layer perceptron."""
 
@@ -42,6 +51,7 @@ class MessagePassingLayer(nn.Module):
     activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
     dropout_rate: float = 0
     deterministic: bool = True
+    mean_instead_of_sum: bool = False
 
     @nn.compact
     def __call__(self, graph):
@@ -61,7 +71,10 @@ class MessagePassingLayer(nn.Module):
         vec_node_mlp = jax.vmap(node_mlp_function, in_axes=0)
 
         new_tmp_nodes = vec_node_mlp(concat_args)
-        recv_nodes = jraph.segment_sum(new_tmp_nodes, graph.receivers, num_segments=self.num_nodes)
+        if self.mean_instead_of_sum:
+            recv_nodes = jraph.segment_mean(new_tmp_nodes, graph.receivers, num_segments=self.num_nodes)
+        else:
+            recv_nodes = jraph.segment_sum(new_tmp_nodes, graph.receivers, num_segments=self.num_nodes)
         if self.num_nodes is None:
             num_nodes = graph.nodes.shape[0]
             new_nodes = jnp.vstack((recv_nodes, jnp.zeros((num_nodes - recv_nodes.shape[0],) + recv_nodes.shape[1:])))
@@ -99,8 +112,12 @@ class MessagePassingLayer(nn.Module):
         global_mlp_vmap = jax.vmap(global_mlp_function, in_axes=0)
 
         # Split and sum node features by graph
-        summed_node_features = split_and_sum(graph.nodes, graph.n_node)
-        summed_edge_features = split_and_sum(graph.edges, graph.n_edge)
+        if self.mean_instead_of_sum:
+            summed_node_features = split_and_mean(graph.nodes, graph.n_node)
+            summed_edge_features = split_and_mean(graph.edges, graph.n_edge)
+        else:
+            summed_node_features = split_and_sum(graph.nodes, graph.n_node)
+            summed_edge_features = split_and_sum(graph.edges, graph.n_edge)
 
         tmp_node_global = global_node_mlp_vmap(summed_node_features)
         tmp_edge_global = global_edge_mlp_vmap(summed_edge_features)
@@ -124,6 +141,7 @@ class MessagePassing(nn.Module):
     activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
     dropout_rate: float = 0
     deterministic: bool = True
+    mean_instead_of_sum: bool = False
 
     def setup(self):
         if len(self.node_feature_sizes) != len(self.edge_feature_sizes):
@@ -142,6 +160,7 @@ class MessagePassing(nn.Module):
                 dropout_rate=self.dropout_rate,
                 deterministic=self.deterministic,
                 num_nodes=self.num_nodes,
+                mean_instead_of_sum=self.mean_instead_of_sum,
             )
             for i in range(size)
         ]

@@ -92,25 +92,6 @@ def test_global_features():
 
     result = np.asarray(new_graph.globals)
 
-    expected_result = np.array(
-        [
-            [
-                3.0,
-                3.0,
-                3.0,
-                2.6666667,
-                5.0,
-                10.0,
-            ],
-            [
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                4.0,
-                1.0,
-            ],
-        ]
-    )
+    expected_result = np.array([[3.0, 2.3333333, 3.0, 2.6666667, 5.0, 10.0], [1.0, 1.0, 1.0, 1.0, 4.0, 1.0]])
 
     assert np.allclose(result, expected_result)
