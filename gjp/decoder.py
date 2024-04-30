@@ -103,4 +103,5 @@ class InitGraphDecoder(nn.Module):
 
 
 class GraphDecoder(nn.Module):
-    pass
+    prob_stack: Sequence[int]
+    edge_feature_stack: Sequence[int]
