@@ -186,10 +186,15 @@ class GraphDecoder(nn.Module):
         new_arch_graph = jraph.GraphsTuple(
             nodes=sorted_nodes.reshape(sorted_nodes.shape[0] * sorted_nodes.shape[1], sorted_nodes.shape[-1]),
             edges=sorted_edges.reshape(sorted_edges.shape[0] * sorted_edges.shape[1], sorted_edges.shape[2]),
-            senders=new_senders,
-            receivers=new_receivers,
-            n_edge=new_n_edge,
-            n_node=new_n_node,
+            senders=new_senders.astype(int),
+            receivers=new_receivers.astype(int),
+            n_edge=new_n_edge.astype(int),
+            n_node=new_n_node.astype(int),
             globals=new_global,
         )
-        return new_arch_graph
+
+        # And finally we run message passing again new graph with correct architecture, to finalize node and edge attributes
+        final_gnn = MessagePassing(node_feature_sizes=self.feature_node_stack, edge_feature_sizes=self.feature_edge_stack, global_feature_sizes=None, mean_instead_of_sum=self.mean_instead_of_sum)
+        final_graph = final_gnn(new_arch_graph)
+
+        return final_graph
