@@ -60,7 +60,7 @@ class MessagePassingLayer(nn.Module):
         edge_features = graph.edges
         global_features = graph.globals
 
-        edge_repeat_global = jnp.repeat(global_features, graph.n_edge, axis=0)
+        edge_repeat_global = jnp.repeat(global_features, graph.n_edge, axis=0, total_repeat_length=graph.receivers.shape[0])
 
         concat_args = jnp.hstack([send_node_feature, recv_node_feature, edge_features, edge_repeat_global])
 
@@ -149,7 +149,7 @@ class MessagePassing(nn.Module):
     global_feature_sizes: Sequence[Sequence[int]]
     num_nodes: int = None
     activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
-    dropout_rate: float = 0
+    dropout_rate: float = 0.1
     deterministic: bool = True
     mean_instead_of_sum: bool = False
 

@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import jraph
 from flax import linen as nn
 
-from .model import MLP
+from .model import MLP, MessagePassing
 
 
 class InitialEdgeDecoder(nn.Module):
@@ -68,7 +68,7 @@ class InitialNodeDecoder(nn.Module):
         return node_features
 
 
-class InitGraphDecoder(nn.Module):
+class InitialGraphDecoder(nn.Module):
     init_edge_stack: Sequence[int]
     init_edge_features: int
     init_node_stack: Sequence[int]
@@ -78,9 +78,6 @@ class InitGraphDecoder(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        jnp.rint(x[:, -2])
-        jnp.rint(x[:, -1])
-
         init_edges = InitialEdgeDecoder(mlp_stack=self.init_edge_stack, max_num_nodes=self.max_num_nodes, max_num_edges=self.max_num_edges, n_edge_features=self.init_edge_features)
         init_senders, init_receivers, init_edge_features = init_edges(x)
         init_edge_features = init_edge_features.reshape((init_edge_features.shape[0] * init_edge_features.shape[1], init_edge_features.shape[2]))
@@ -103,5 +100,96 @@ class InitGraphDecoder(nn.Module):
 
 
 class GraphDecoder(nn.Module):
-    prob_stack: Sequence[int]
-    edge_feature_stack: Sequence[int]
+    init_edge_stack: Sequence[int]
+    init_edge_features: int
+    init_node_stack: Sequence[int]
+    init_node_features: int
+    max_num_nodes: int
+    max_num_edges: int
+    prob_node_stack: Sequence[Sequence[int]]
+    prob_edge_stack: Sequence[Sequence[int]]
+    feature_edge_stack: Sequence[Sequence[int]]
+    feature_node_stack: Sequence[Sequence[int]]
+    mean_instead_of_sum: bool = True
+
+    @nn.compact
+    def __call__(self, x):
+        n_node = jnp.rint(x[:, -2])
+        n_node_mod = n_node + jnp.arange(x.shape[0]) * self.max_num_nodes
+        n_edge = jnp.rint(x[:, -1])
+
+        initial_graph_decoder = InitialGraphDecoder(
+            init_edge_stack=self.init_edge_stack, init_edge_features=self.init_edge_features, init_node_stack=self.init_node_stack, init_node_features=self.init_node_features, max_num_nodes=self.max_num_nodes, max_num_edges=self.max_num_edges
+        )
+
+        initial_graph = initial_graph_decoder(x)
+        initial_nodes = initial_graph.nodes.reshape(x.shape[0], self.max_num_nodes, initial_graph.nodes.shape[1])
+
+        # The initial graph has unsorted info, without interpretability yet.
+        # We run 2 Message-Passing GNN on this, the first one predicts the probability of nodes and edges
+        prob_gnn = MessagePassing(node_feature_sizes=self.prob_node_stack + ((1,),), edge_feature_sizes=self.prob_node_stack + ((1,),), global_feature_sizes=None, mean_instead_of_sum=self.mean_instead_of_sum)
+        prob_graph = prob_gnn(initial_graph)
+
+        # Now we sort the the nodes and edges, to make a valid and an invalid graph out of every one
+        node_probs = jax.nn.softmax(prob_graph.nodes.reshape((x.shape[0], self.max_num_nodes)), axis=1) + 1
+        prob_sort_idx = jnp.argsort(-node_probs, axis=1)
+        sorted_nodes = initial_nodes[jnp.arange(initial_nodes.shape[0])[:, None], prob_sort_idx]
+
+        # Set batch node properties to 0
+        node_logic = jnp.arange(sorted_nodes.shape[0] * sorted_nodes.shape[1]) < jnp.repeat(n_node_mod, jnp.ones(x.shape[0], dtype=int) * self.max_num_nodes, total_repeat_length=sorted_nodes.shape[0] * sorted_nodes.shape[1])
+        node_logic = node_logic.reshape((sorted_nodes.shape[0], sorted_nodes.shape[1]))
+        node_logic = jnp.repeat(node_logic, sorted_nodes.shape[-1], axis=1).reshape(sorted_nodes.shape)
+        sorted_nodes = sorted_nodes * node_logic
+
+        # Now we do the edges.
+        # First sort them as we sorted the nodes.
+        inverse_edge_permutation = jnp.argsort(prob_sort_idx, axis=1) + jnp.arange(x.shape[0])[:, None] * self.max_num_nodes
+
+        new_senders = inverse_edge_permutation.flatten()[initial_graph.senders.astype(int)]
+        new_senders = new_senders.reshape((x.shape[0], self.max_num_edges))
+        new_receivers = inverse_edge_permutation.flatten()[initial_graph.receivers.astype(int)]
+        new_receivers = new_receivers.reshape((x.shape[0], self.max_num_edges))
+
+        # Then evaluate the probabilities of the edges existing
+        edge_probs = jax.nn.softmax(prob_graph.edges.reshape((x.shape[0], self.max_num_edges)), axis=1) + 1
+        edge_probs = jnp.arange(x.shape[0] * self.max_num_edges).reshape((x.shape[0], self.max_num_edges)) + 1
+
+        # Edges that connect to non-existing nodes are set to prob = 0
+        edge_logic = jnp.logical_and(new_senders < n_node_mod[:, None], new_receivers < n_node_mod[:, None])
+        edge_probs = edge_probs * edge_logic
+
+        edge_sort_idx = jnp.argsort(-edge_probs, axis=1)
+        initial_edges = initial_graph.edges.reshape(x.shape[0], self.max_num_edges, initial_graph.edges.shape[1])
+        sorted_edges = initial_edges[jnp.arange(initial_edges.shape[0])[:, None], edge_sort_idx]
+        new_senders = new_senders[jnp.arange(new_senders.shape[0])[:, None], edge_sort_idx]
+        new_receivers = new_receivers[jnp.arange(new_receivers.shape[0])[:, None], edge_sort_idx]
+
+        n_edge = jnp.min(jnp.vstack([n_edge, jnp.sum(edge_logic, axis=1, dtype=int)], dtype=int), axis=0)
+        n_edge_mod = n_edge + jnp.arange(x.shape[0], dtype=int) * self.max_num_edges
+
+        # Eliminate non-existent edges by send/recv
+        n_edge_repeat = jnp.repeat(n_edge_mod, self.max_num_edges, axis=0)
+        exclusion_logic = jnp.arange(n_edge_repeat.size, dtype=int) >= n_edge_repeat
+        n_node_repeat = jnp.repeat(n_node_mod, self.max_num_edges, axis=0)
+        new_senders = new_senders.flatten() * ~exclusion_logic + exclusion_logic * n_node_repeat
+        new_receivers = new_receivers.flatten() * ~exclusion_logic + exclusion_logic * n_node_repeat
+
+        # Eliminate all probs of non-existent edge properties
+        repeat_logic = jnp.repeat(exclusion_logic, sorted_edges.shape[2], axis=0)
+        sorted_edges = sorted_edges.flatten() * ~repeat_logic.flatten()
+        sorted_edges = sorted_edges.reshape(initial_edges.shape)
+
+        new_n_node = jnp.vstack((n_node, jnp.repeat(self.max_num_nodes, x.shape[0]) - n_node)).flatten(order="F")
+        new_n_edge = jnp.vstack((n_edge, jnp.repeat(self.max_num_edges, x.shape[0]) - n_edge)).flatten(order="F")
+        new_global = jnp.hstack((x, x * 0)).reshape((2 * x.shape[0],) + x.shape[1:])
+
+        new_arch_graph = jraph.GraphsTuple(
+            nodes=sorted_nodes.reshape(sorted_nodes.shape[0] * sorted_nodes.shape[1], sorted_nodes.shape[-1]),
+            edges=sorted_edges.reshape(sorted_edges.shape[0] * sorted_edges.shape[1], sorted_edges.shape[2]),
+            senders=new_senders,
+            receivers=new_receivers,
+            n_edge=new_n_edge,
+            n_node=new_n_node,
+            globals=new_global,
+        )
+        return new_arch_graph

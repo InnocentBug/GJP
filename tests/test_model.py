@@ -32,7 +32,8 @@ def test_simple_pass():
         model = MessagePassing(node_stack, edge_stack, global_stack, num_nodes=max_node_pad)
         params = model.init(init_rng, train_jraph[0])
 
-        out_graph = model.apply(params, test_jraph[0])
+        apply_model = jax.jit(lambda x: model.apply(params, x))
+        out_graph = apply_model(test_jraph[0])
         assert out_graph.nodes.shape[1] == final_node_size
         assert out_graph.edges.shape[1] == final_edge_size
         assert out_graph.globals.shape[1] == final_global_size
@@ -72,7 +73,8 @@ def test_mean_instead_of_sum(mean_instead_of_sum):
         model = MessagePassing(node_stack, edge_stack, global_stack, num_nodes=node_batch_size, mean_instead_of_sum=mean_instead_of_sum)
         params = model.init(init_rng, batch_test)
 
-        out_graph = model.apply(params, batch_train)
+        apply_model = jax.jit(lambda x: model.apply(params, x))
+        out_graph = apply_model(batch_train)
         assert out_graph.nodes.shape[1] == final_node_size
         assert out_graph.edges.shape[1] == final_edge_size
         assert out_graph.globals.shape[1] == final_global_size
@@ -128,7 +130,8 @@ def test_stacks(edge_stack, node_stack, global_stack):
         model = MessagePassing(node_stack, edge_stack, global_stack, num_nodes=node_batch_size)
         params = model.init(init_rng, batch_test)
 
-        out_graph = model.apply(params, batch_train)
+        apply_model = jax.jit(lambda x: model.apply(params, x))
+        out_graph = apply_model(batch_train)
         if node_stack:
             assert out_graph.nodes.shape[1] == final_node_size
         else:

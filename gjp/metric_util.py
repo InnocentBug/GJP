@@ -17,11 +17,16 @@ from .model import MessagePassing
 
 def nx_from_jraph(jraph_graph):
     nx_graph = nx.MultiDiGraph()
+    counter = 0
     for i, feature in enumerate(jraph_graph.nodes):
         nx_graph.add_node(i, feature=feature)
+        counter += 1
 
+    edge_counter = 0
     for u, v, feature in zip(jraph_graph.senders, jraph_graph.receivers, jraph_graph.edges):
         nx_graph.add_edge(u_for_edge=int(u), v_for_edge=int(v), feature=feature)
+        edge_counter += 1
+
     return nx_graph
 
 
