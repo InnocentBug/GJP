@@ -120,7 +120,7 @@ def test_graph_decoder(ensure_tempfile, seed):
     prob_edge_depth = int(jax.random.randint(use_rng, (1,), 1, 4))
     rng, use_rng = jax.random.split(rng)
 
-    model_args["prob_node_stack"] = list(jax.random.randint(use_rng, (prob_stack_length, prob_node_depth), 1, 32))
+    model_args["prob_node_stack"] = [list(i) for i in list(jax.random.randint(use_rng, (prob_stack_length, prob_node_depth), 1, 32))]
     rng, use_rng = jax.random.split(rng)
     model_args["prob_edge_stack"] = list(jax.random.randint(use_rng, (prob_stack_length, prob_edge_depth), 1, 32))
     rng, use_rng = jax.random.split(rng)
