@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 import jraph
-import pytest
 
 from gjp import GraphData, MessagePassing, batch_list, convert_to_jraph, metric_util
 

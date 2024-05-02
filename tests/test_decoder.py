@@ -1,5 +1,4 @@
 import hashlib
-import os
 
 import jax
 import jax.numpy as jnp
@@ -87,37 +86,37 @@ def test_graph_decoder(ensure_tempfile, seed):
 
     model_args = {}
 
-    max_num_nodes = int(jax.random.randint(use_rng, (1,), 3, 50))
+    max_num_nodes = int(jax.random.randint(use_rng, (1,), 3, 50)[0])
     model_args["max_num_nodes"] = max_num_nodes
     rng, use_rng = jax.random.split(rng)
-    max_num_edges = int(jax.random.randint(use_rng, (1,), max_num_nodes, 2 * max_num_nodes))
+    max_num_edges = int(jax.random.randint(use_rng, (1,), max_num_nodes, 2 * max_num_nodes)[0])
     model_args["max_num_edges"] = max_num_edges
     rng, use_rng = jax.random.split(rng)
 
-    init_edge_stack_size = int(jax.random.randint(use_rng, (1,), 1, 5))
+    init_edge_stack_size = int(jax.random.randint(use_rng, (1,), 1, 5)[0])
     rng, use_rng = jax.random.split(rng)
     init_edge_stack = [int(i) for i in jax.random.randint(use_rng, (init_edge_stack_size,), 1, 64)]
     model_args["init_edge_stack"] = init_edge_stack
     rng, use_rng = jax.random.split(rng)
 
-    init_edge_features = int(jax.random.randint(use_rng, (1,), 2, 10))
+    init_edge_features = int(jax.random.randint(use_rng, (1,), 2, 10)[0])
     rng, use_rng = jax.random.split(rng)
     model_args["init_edge_features"] = init_edge_features
 
-    node_stack_size = int(jax.random.randint(use_rng, (1,), 1, 5))
+    node_stack_size = int(jax.random.randint(use_rng, (1,), 1, 5)[0])
     rng, use_rng = jax.random.split(rng)
     model_args["init_node_stack"] = [int(i) for i in jax.random.randint(use_rng, (node_stack_size,), 1, 64)]
     rng, use_rng = jax.random.split(rng)
 
-    model_args["init_node_features"] = int(jax.random.randint(use_rng, (1,), 1, 10))
+    model_args["init_node_features"] = int(jax.random.randint(use_rng, (1,), 1, 10)[0])
     rng, use_rng = jax.random.split(rng)
 
-    prob_stack_length = int(jax.random.randint(use_rng, (1,), 1, 10))
+    prob_stack_length = int(jax.random.randint(use_rng, (1,), 1, 10)[0])
     rng, use_rng = jax.random.split(rng)
 
-    prob_node_depth = int(jax.random.randint(use_rng, (1,), 1, 4))
+    prob_node_depth = int(jax.random.randint(use_rng, (1,), 1, 4)[0])
     rng, use_rng = jax.random.split(rng)
-    prob_edge_depth = int(jax.random.randint(use_rng, (1,), 1, 4))
+    prob_edge_depth = int(jax.random.randint(use_rng, (1,), 1, 4)[0])
     rng, use_rng = jax.random.split(rng)
 
     model_args["prob_node_stack"] = list(jax.random.randint(use_rng, (prob_stack_length, prob_node_depth), 1, 32))
@@ -125,12 +124,12 @@ def test_graph_decoder(ensure_tempfile, seed):
     model_args["prob_edge_stack"] = list(jax.random.randint(use_rng, (prob_stack_length, prob_edge_depth), 1, 32))
     rng, use_rng = jax.random.split(rng)
 
-    feature_stack_length = int(jax.random.randint(use_rng, (1,), 1, 10))
+    feature_stack_length = int(jax.random.randint(use_rng, (1,), 1, 10)[0])
     rng, use_rng = jax.random.split(rng)
 
-    feature_node_depth = int(jax.random.randint(use_rng, (1,), 1, 4))
+    feature_node_depth = int(jax.random.randint(use_rng, (1,), 1, 4)[0])
     rng, use_rng = jax.random.split(rng)
-    feature_edge_depth = int(jax.random.randint(use_rng, (1,), 1, 4))
+    feature_edge_depth = int(jax.random.randint(use_rng, (1,), 1, 4)[0])
     rng, use_rng = jax.random.split(rng)
 
     model_args["feature_node_stack"] = list(jax.random.randint(use_rng, (feature_stack_length, feature_node_depth), 1, 32))
@@ -143,9 +142,9 @@ def test_graph_decoder(ensure_tempfile, seed):
     original_path, _ = ensure_tempfile
     model = decoder.GraphDecoder(**model_args)
 
-    input_size = int(jax.random.randint(use_rng, (1,), 2, 4))
+    input_size = int(jax.random.randint(use_rng, (1,), 2, 4)[0])
     rng, use_rng = jax.random.split(rng)
-    input_dim = int(jax.random.randint(use_rng, (1,), 2, 10))
+    input_dim = int(jax.random.randint(use_rng, (1,), 2, 10)[0])
     rng, use_rng = jax.random.split(rng)
 
     data_input = jax.random.normal(use_rng, (input_dim, input_size))
@@ -158,9 +157,6 @@ def test_graph_decoder(ensure_tempfile, seed):
 
     test_input = jnp.vstack((data_input, n_node, n_edge)).transpose()
 
-    old_test_input = jnp.asarray([[0.1, 0.2, 0.3, 3, 6], [10.5, 51.2, 451.4, 7, 10], [1.5, 5.2, 41.4, 9, 19]])
-    print(test_input)
-
     params = model.init(use_rng, test_input)
     rng, use_rng = jax.random.split(rng)
 
@@ -170,7 +166,7 @@ def test_graph_decoder(ensure_tempfile, seed):
 
     m = hashlib.shake_256()
     m.update(test_input.tobytes())
-    metric_util.svg_graph_list(unbatch_new_graph, filename=os.path.join(original_path, f"test_graph_decoder{m.hexdigest(3)}.pdf"))
+    # metric_util.svg_graph_list(unbatch_new_graph, filename=os.path.join(original_path, f"test_graph_decoder{m.hexdigest(3)}.pdf"))
 
     # Run some test to make sure the are legit
     for i in range(test_input.shape[0]):
