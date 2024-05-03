@@ -1,4 +1,5 @@
 # trunk-ignore-all(ruff/F401)
+from .decoder import GraphDecoder
 from .graphset import (
     GraphData,
     batch_list,
