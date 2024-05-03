@@ -127,7 +127,9 @@ class GraphDecoder(nn.Module):
 
         # The initial graph has unsorted info, without interpretability yet.
         # We run 2 Message-Passing GNN on this, the first one predicts the probability of nodes and edges
-        prob_gnn = MessagePassing(node_feature_sizes=self.prob_node_stack + ((1,),), edge_feature_sizes=self.prob_node_stack + ((1,),), global_feature_sizes=None, mean_instead_of_sum=self.mean_instead_of_sum)
+        prob_gnn = MessagePassing(
+            node_feature_sizes=self.prob_node_stack + ((1,),), edge_feature_sizes=self.prob_node_stack + ((1,),), global_feature_sizes=None, mean_instead_of_sum=self.mean_instead_of_sum, num_nodes=x.shape[0] * self.max_num_nodes
+        )
         prob_graph = prob_gnn(initial_graph)
 
         # Now we sort the the nodes and edges, to make a valid and an invalid graph out of every one
@@ -194,7 +196,7 @@ class GraphDecoder(nn.Module):
         )
 
         # And finally we run message passing again new graph with correct architecture, to finalize node and edge attributes
-        final_gnn = MessagePassing(node_feature_sizes=self.feature_node_stack, edge_feature_sizes=self.feature_edge_stack, global_feature_sizes=None, mean_instead_of_sum=self.mean_instead_of_sum)
+        final_gnn = MessagePassing(node_feature_sizes=self.feature_node_stack, edge_feature_sizes=self.feature_edge_stack, global_feature_sizes=None, mean_instead_of_sum=self.mean_instead_of_sum, num_nodes=x.shape[0] * self.max_num_nodes)
         final_graph = final_gnn(new_arch_graph)
 
         return final_graph
