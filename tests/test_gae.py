@@ -78,8 +78,8 @@ def test_gae():
             assert out_graph.n_edge[0] <= in_graph.n_edge[0]
 
 
-@pytest.mark.parametrize("norm", [True, False])
-def test_loss(norm):
+@pytest.mark.parametrize("norm,global_probs", [(True, True), (False, True), (True, False), (False, False)])
+def test_loss(norm, global_probs):
     with GraphData(".test_batching") as dataset:
         train, _ = dataset.get_test_train(15, 0, 5, 11)
         train_jraph = convert_to_jraph(train)
@@ -125,7 +125,7 @@ def test_loss(norm):
         metric_model = MessagePassing(node_stack, edge_stack, global_stack, num_nodes=max_num_nodes * len(train_jraph))
         metric_params = metric_model.init(rng_split, batch_train)
 
-        partial_loss = partial(gae.loss_function, model=model, metric_params=metric_params, metric_model=metric_model, norm=norm)
+        partial_loss = partial(gae.loss_function, model=model, metric_params=metric_params, metric_model=metric_model, norm=norm, global_probs=global_probs, max_num_nodes=max_num_nodes * len(train_jraph))
 
         func = jax.jit(jax.value_and_grad(partial_loss))
 

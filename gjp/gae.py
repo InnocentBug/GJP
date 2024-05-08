@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from flax import linen as nn
 
 from .decoder import GraphDecoder
+from .graphset import change_global_jraph_to_props_inner
 from .model import MessagePassing
 
 
@@ -59,7 +60,7 @@ class GAE(nn.Module):
         return self.encoder(x)
 
 
-def loss_function(params, in_graphs, rng, model, metric_params, metric_model, norm):
+def loss_function(params, in_graphs, rng, model, metric_params, metric_model, norm, global_probs, max_num_nodes):
     in_metric = metric_model.apply(metric_params, in_graphs).globals[:-1]
     tmp_out_graphs = model.apply(params, in_graphs, rngs={"reparametrize": rng})
     embedded_space = tmp_out_graphs.globals[::2]
@@ -73,5 +74,12 @@ def loss_function(params, in_graphs, rng, model, metric_params, metric_model, no
     loss = jnp.mean(jnp.sqrt((in_metric - out_metric) ** 2))
     if norm:
         loss += jnp.mean(jnp.sqrt(embedded_space**2))
+
+    if global_probs:
+        in_probs = change_global_jraph_to_props_inner(in_graphs.senders, in_graphs.receivers, in_graphs.n_node, in_graphs.n_edge, max_num_nodes)
+        in_graphs = in_probs[:-1]
+        out_probs = change_global_jraph_to_props_inner(out_graphs.senders, out_graphs.receivers, out_graphs.n_node, out_graphs.n_edge, max_num_nodes)
+        out_probs = out_probs[::2]
+        loss += jnp.mean(jnp.sqrt((in_probs - out_probs) ** 2))
 
     return loss

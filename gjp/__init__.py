@@ -6,5 +6,6 @@ from .graphset import (
     change_global_jraph_to_props,
     convert_to_jraph,
     get_pad_graph,
+    get_similar_feature_graphs,
 )
 from .model import MLP, MessagePassing, MessagePassingLayer
