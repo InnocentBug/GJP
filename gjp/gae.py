@@ -13,18 +13,20 @@ class GAE(nn.Module):
     encoder_stack: Sequence[Sequence[int]]
     max_num_nodes: int
     max_num_edges: int
+    max_num_graphs: int
+    max_edge_node: int
     init_stack: Sequence[int]
     init_features: int
     prob_stack: Sequence[Sequence[int]]
     feature_stack: Sequence[Sequence[int]]
     node_features: int
     edge_features: int
-    max_num_graph: int = None
+    total_nodes: int
 
     def setup(self):
-        self.encoder = MessagePassing(node_feature_sizes=self.encoder_stack, edge_feature_sizes=self.encoder_stack, global_feature_sizes=self.encoder_stack, num_nodes=self.max_num_nodes * self.max_num_graph if self.max_num_graph else None)
+        self.encoder = MessagePassing(node_feature_sizes=self.encoder_stack, edge_feature_sizes=self.encoder_stack, global_feature_sizes=self.encoder_stack, num_nodes=self.total_nodes)
 
-        self.sigma_encoder = MessagePassing(node_feature_sizes=self.encoder_stack, edge_feature_sizes=self.encoder_stack, global_feature_sizes=self.encoder_stack, num_nodes=self.max_num_nodes * self.max_num_graph if self.max_num_graph else None)
+        self.sigma_encoder = MessagePassing(node_feature_sizes=self.encoder_stack, edge_feature_sizes=self.encoder_stack, global_feature_sizes=self.encoder_stack, num_nodes=self.total_nodes)
 
         self.decoder = GraphDecoder(
             init_edge_stack=self.init_stack,
@@ -38,6 +40,8 @@ class GAE(nn.Module):
             mean_instead_of_sum=True,
             max_num_nodes=self.max_num_nodes,
             max_num_edges=self.max_num_edges,
+            max_edge_node=self.max_edge_node,
+            max_num_graphs=self.max_num_graphs,
         )
 
     def __call__(self, x):
@@ -60,7 +64,7 @@ class GAE(nn.Module):
         return self.encoder(x)
 
 
-def loss_function(params, in_graphs, rng, model, metric_params, metric_model, norm, global_probs, max_num_nodes):
+def loss_function(params, in_graphs, rng, model, metric_params, metric_model, norm, global_probs):
     in_metric = metric_model.apply(metric_params, in_graphs).globals[:-1]
     tmp_out_graphs = model.apply(params, in_graphs, rngs={"reparametrize": rng})
     embedded_space = tmp_out_graphs.globals[::2]
@@ -68,17 +72,19 @@ def loss_function(params, in_graphs, rng, model, metric_params, metric_model, no
 
     out_globals = jnp.repeat(in_graphs.globals, 2, axis=0)
     out_graphs = tmp_out_graphs._replace(globals=out_globals)
+
     out_metric = metric_model.apply(metric_params, out_graphs).globals[::2]
     out_metric = out_metric[:-1]
 
     loss = jnp.mean(jnp.sqrt((in_metric - out_metric) ** 2))
+
     if norm:
         loss += jnp.mean(jnp.sqrt(embedded_space**2))
 
     if global_probs:
-        in_probs = change_global_jraph_to_props_inner(in_graphs.senders, in_graphs.receivers, in_graphs.n_node, in_graphs.n_edge, max_num_nodes)
+        in_probs = change_global_jraph_to_props_inner(in_graphs.senders, in_graphs.receivers, in_graphs.n_node, in_graphs.n_edge, metric_model.num_nodes)
         in_graphs = in_probs[:-1]
-        out_probs = change_global_jraph_to_props_inner(out_graphs.senders, out_graphs.receivers, out_graphs.n_node, out_graphs.n_edge, max_num_nodes)
+        out_probs = change_global_jraph_to_props_inner(out_graphs.senders, out_graphs.receivers, out_graphs.n_node, out_graphs.n_edge, metric_model.num_nodes)
         out_probs = out_probs[::2]
         loss += jnp.mean(jnp.sqrt((in_probs - out_probs) ** 2))
 

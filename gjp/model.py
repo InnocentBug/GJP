@@ -21,7 +21,7 @@ def split_and_mean(array, indices):
     end_cums = cumsum[jnp.cumsum(indices) - 1]
 
     diff_out_results = jnp.diff(end_cums, prepend=0, axis=0)
-    return diff_out_results / indices[:, None]
+    return diff_out_results / (indices[:, None] + 1e-6)
 
 
 class MLP(nn.Module):

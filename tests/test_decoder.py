@@ -12,7 +12,7 @@ jax.config.update("jax_platform_name", "cpu")
 
 @pytest.mark.parametrize("max_num_nodes, max_num_edges, n_edge_features", [(3, 6, 3), (7, 3, 5), (50, 150, 7)])
 def test_initial_edge_decoder(max_num_nodes, max_num_edges, n_edge_features):
-    model = decoder.InitialEdgeDecoder(mlp_stack=[16, 32, 64], max_num_nodes=max_num_nodes, max_num_edges=max_num_edges, n_edge_features=n_edge_features)
+    model = decoder.InitialEdgeDecoder(mlp_stack=[16, 32, 64], max_num_nodes=max_num_nodes, max_num_edges=max_num_edges, n_edge_features=n_edge_features, max_edge_node=max_num_edges * max_num_nodes)
 
     test_input = jnp.asarray([[1, 5, 8, 6.1, 44], [1, 5, 8, 6.1, 4.4]])
 
@@ -53,7 +53,9 @@ def test_initial_node_decoder(max_num_nodes, n_node_features):
 @pytest.mark.parametrize("init_edge_features, init_node_features, max_num_nodes, max_num_edges", [(3, 2, 4, 8), (7, 9, 50, 100)])
 def test_initial_graph_decoder(init_edge_features, init_node_features, max_num_nodes, max_num_edges):
 
-    model = decoder.InitialGraphDecoder(init_edge_stack=[2, 4, 8], init_edge_features=init_edge_features, init_node_stack=[5, 10, 7], init_node_features=init_node_features, max_num_nodes=max_num_nodes, max_num_edges=max_num_edges)
+    model = decoder.InitialGraphDecoder(
+        init_edge_stack=[2, 4, 8], init_edge_features=init_edge_features, init_node_stack=[5, 10, 7], init_node_features=init_node_features, max_num_nodes=max_num_nodes, max_num_edges=max_num_edges, max_edge_node=max_num_edges * max_num_nodes
+    )
 
     test_input = jnp.asarray([[0.1, 0.2, 0.3, 5, 6], [0.5, 0.2, 0.4, 7, 14]])
 
@@ -138,10 +140,7 @@ def test_graph_decoder(ensure_tempfile, seed):
     model_args["feature_edge_stack"] = jax.random.randint(use_rng, (feature_stack_length, feature_edge_depth), 1, 32).tolist()
     rng, use_rng = jax.random.split(rng)
 
-    print(model_args)
-
-    original_path, _ = ensure_tempfile
-    model = decoder.GraphDecoder(**model_args)
+    model_args["max_edge_node"] = model_args["max_num_nodes"] * model_args["max_num_edges"]
 
     input_size = int(jax.random.randint(use_rng, (1,), 2, 4)[0])
     rng, use_rng = jax.random.split(rng)
@@ -157,6 +156,13 @@ def test_graph_decoder(ensure_tempfile, seed):
     rng, use_rng = jax.random.split(rng)
 
     test_input = jnp.vstack((data_input, n_node, n_edge)).transpose()
+
+    model_args["max_num_graphs"] = test_input.shape[0] + 1
+
+    print(model_args)
+
+    original_path, _ = ensure_tempfile
+    model = decoder.GraphDecoder(**model_args)
 
     params = model.init(use_rng, test_input)
     rng, use_rng = jax.random.split(rng)
