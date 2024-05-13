@@ -6,22 +6,27 @@ import jraph
 from flax import linen as nn
 
 
-# @jax.jit
+@jax.jit
 def split_and_sum(array, indices):
-    cumsum = jnp.cumsum(array, axis=0)
-    end_cums = cumsum[jnp.cumsum(indices) - 1]
+    cumsum_tmp = jnp.cumsum(
+        array,
+        axis=0,
+    )
+    cumsum = jnp.vstack([jnp.zeros((1,) + array.shape[1:]), cumsum_tmp])
+    end_cums = cumsum[jnp.cumsum(indices)]
 
     diff_out_results = jnp.diff(end_cums, prepend=0, axis=0)
     return diff_out_results
 
 
-# @jax.jit
+@jax.jit
 def split_and_mean(array, indices):
-    cumsum = jnp.cumsum(array, axis=0)
-    end_cums = cumsum[jnp.cumsum(indices) - 1]
+    cumsum_tmp = jnp.cumsum(array, axis=0)
+    cumsum = jnp.vstack([jnp.zeros((1,) + array.shape[1:]), cumsum_tmp])
+    end_cums = cumsum[jnp.cumsum(indices)]
 
     diff_out_results = jnp.diff(end_cums, prepend=0, axis=0)
-    return diff_out_results / (indices[:, None] + 1e-6)
+    return diff_out_results / (indices[:, None] + 1e-9)
 
 
 class MLP(nn.Module):

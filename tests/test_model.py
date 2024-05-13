@@ -3,7 +3,14 @@ import jax.numpy as jnp
 import jraph
 import pytest
 
-from gjp import GraphData, MessagePassing, batch_list, convert_to_jraph, metric_util
+from gjp import (
+    GraphData,
+    MessagePassing,
+    batch_list,
+    convert_to_jraph,
+    metric_util,
+    model,
+)
 
 
 def test_simple_pass():
@@ -194,3 +201,39 @@ def test_batching():
             global_b = graph.globals
             assert jnp.sqrt(jnp.sum((global_a - global_b) ** 2)) < 5e-6
             assert jnp.allclose(global_a, global_b, rtol=rtol, atol=atol)
+
+
+def test_split_and_sum():
+    input_array = jnp.asarray([[1, 1], [2, 1], [3, 3], [4, 4], [56, 6], [8, 8], [9, 8], [9, 8], [0, 1]])
+    input_index = jnp.asarray([2, 4, 2, 1])
+
+    output = model.split_and_sum(input_array, input_index)
+    assert jnp.allclose(output, jnp.asarray([[3, 2], [71, 21], [18, 16], [0, 1]]))
+
+    input_array2 = jnp.asarray([[1, 1], [2, 1], [3, 3], [4, 4], [56, 6], [8, 8], [9, 8], [9, 8]])
+    input_index2 = jnp.asarray([0, 2, 4, 0, 2, 0])
+    output2 = model.split_and_sum(input_array2, input_index2)
+    assert jnp.allclose(output2, jnp.asarray([[0, 0], [3, 2], [71, 21], [0, 0], [18, 16], [0, 0]]))
+
+    input_array3 = jnp.asarray(jnp.ones((0, 5)))
+    input_index3 = jnp.asarray([0])
+    output3 = model.split_and_sum(input_array3, input_index3)
+    assert output3.shape == (1, 5)
+
+
+def test_split_and_mean():
+    input_array = jnp.asarray([[1, 1], [2, 1], [3, 3], [4, 4], [56, 6], [8, 8], [9, 8], [9, 8], [0, 1]])
+    input_index = jnp.asarray([2, 4, 2, 1])
+
+    output = model.split_and_mean(input_array, input_index)
+    assert jnp.allclose(output, jnp.asarray([[1.5, 1], [17.75, 5.25], [9, 8], [0, 1]]))
+
+    input_array2 = jnp.asarray([[1, 1], [2, 1], [3, 3], [4, 4], [56, 6], [8, 8], [9, 8], [9, 8]])
+    input_index2 = jnp.asarray([0, 2, 4, 0, 2, 0])
+    output2 = model.split_and_mean(input_array2, input_index2)
+    assert jnp.allclose(output2, jnp.asarray([[0, 0], [1.5, 1], [17.75, 5.25], [0, 0], [9, 8], [0, 0]]))
+
+    input_array3 = jnp.asarray(jnp.ones((0, 5)))
+    input_index3 = jnp.asarray([0])
+    output3 = model.split_and_mean(input_array3, input_index3)
+    assert output3.shape == (1, 5)
