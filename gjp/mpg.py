@@ -122,7 +122,7 @@ class MessagePassingGraph(nn.Module):
             MessagePassingGraphLayer(
                 self.node_stack[i] if self.node_stack is not None else None,
                 self.edge_stack[i] if self.edge_stack is not None else None,
-                self.attention_stack[i] if self.edge_stack is not None else None,
+                self.attention_stack[i] if self.attention_stack is not None else None,
                 self.global_stack[i] if self.global_stack is not None else None,
                 self.mlp_kwargs,
             )
