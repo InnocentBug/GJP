@@ -8,8 +8,8 @@ from .model import MLP
 
 
 class MessagePassingGraphLayer(nn.Module):
-    node_feature_size: Optional[Sequence[int]] = None
-    edge_feature_size: Optional[Sequence[int]] = None
+    node_stack: Optional[Sequence[int]] = None
+    edge_stack: Optional[Sequence[int]] = None
     attention_stack: Optional[Sequence[int]] = None
     global_stack: Optional[Sequence[int]] = None
     mlp_kwargs: Optional[Dict] = None
@@ -21,16 +21,16 @@ class MessagePassingGraphLayer(nn.Module):
             self._mlp_kwargs = self.mlp_kwargs
 
         update_nodes = None
-        if self.node_feature_size:
-            self.node_mlp = MLP(self.node_feature_size, **self._mlp_kwargs)
+        if self.node_stack:
+            self.node_mlp = MLP(self.node_stack, **self._mlp_kwargs)
 
             @jraph.concatenated_args
             def update_nodes(features):
                 return self.node_mlp(features)
 
         update_edges = None
-        if self.edge_feature_size:
-            self.edge_mlp = MLP(self.edge_feature_size, **self._mlp_kwargs)
+        if self.edge_stack:
+            self.edge_mlp = MLP(self.edge_stack, **self._mlp_kwargs)
 
             @jraph.concatenated_args
             def update_edges(features):
@@ -85,3 +85,52 @@ class MessagePassingGraphLayer(nn.Module):
 
     def __call__(self, x):
         return self.graph_network(x)
+
+
+class MessagePassingGraph(nn.Module):
+    node_stack: Optional[Sequence[Optional[Sequence[int]]]] = None
+    edge_stack: Optional[Sequence[Optional[Sequence[int]]]] = None
+    attention_stack: Optional[Sequence[Optional[Sequence[int]]]] = None
+    global_stack: Optional[Sequence[Optional[Sequence[int]]]] = None
+    mlp_kwargs: Optional[Dict] = None
+
+    def setup(self):
+        if self.node_stack is not None and self.edge_stack is not None:
+            if len(self.node_stack) != len(self.edge_stack):
+                raise RuntimeError("The size of the edge, node, and global message passing stack must be identical.")
+        if self.global_stack is not None and self.edge_stack is not None:
+            if len(self.global_stack) != len(self.edge_stack):
+                raise RuntimeError("The size of the edge, node, and global message passing stack must be identical.")
+        if self.node_stack is not None and self.global_stack is not None:
+            if len(self.global_stack) != len(self.node_stack):
+                raise RuntimeError("The size of the edge, node, and global message passing stack must be identical.")
+        if self.node_stack is not None and self.attention_stack is not None:
+            if len(self.attention_stack) != len(self.node_stack):
+                raise RuntimeError("The size of the edge, node, attention, and global message passing stack must be identical.")
+
+        size = 0
+        if self.node_stack is not None:
+            size = len(self.node_stack)
+        elif self.edge_stack is not None:
+            size = len(self.edge_stack)
+        elif self.global_stack is not None:
+            size = len(self.global_stack)
+        elif self.attention_stack is not None:
+            size = len(self.attention_stack)
+
+        self.msg_layers = [
+            MessagePassingGraphLayer(
+                self.node_stack[i] if self.node_stack is not None else None,
+                self.edge_stack[i] if self.edge_stack is not None else None,
+                self.attention_stack[i] if self.edge_stack is not None else None,
+                self.global_stack[i] if self.global_stack is not None else None,
+                self.mlp_kwargs,
+            )
+            for i in range(size)
+        ]
+
+    def __call__(self, in_graphs):
+        tmp_graphs = in_graphs
+        for layer in self.msg_layers:
+            tmp_graphs = layer(tmp_graphs)
+        return tmp_graphs
