@@ -35,7 +35,7 @@ class MLP(nn.Module):
     feature_sizes: Sequence[int]
     dropout_rate: float = 0
     deterministic: bool = True
-    activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
 
     @nn.compact
     def __call__(self, inputs):
