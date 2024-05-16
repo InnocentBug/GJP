@@ -84,7 +84,8 @@ class MessagePassingGraphLayer(nn.Module):
         )
 
     def __call__(self, x):
-        return self.graph_network(x)
+        new_graph = self.graph_network(x)
+        return new_graph
 
 
 class MessagePassingGraph(nn.Module):

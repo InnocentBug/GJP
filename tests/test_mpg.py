@@ -1,9 +1,12 @@
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import jraph
+import optax
 import pytest
 
-from gjp import mpg
+from gjp import metric_util, mpg
 
 
 def compare_graphs(a, b, node_end, edge_end):
@@ -180,3 +183,46 @@ def test_batching(batch_graphs):
         global_b = graph.globals
         assert jnp.sqrt(jnp.sum((global_a - global_b) ** 2)) < 5e-6
         assert jnp.allclose(global_a, global_b, rtol=rtol, atol=atol)
+
+
+def train_step(batch_train, batch_test, opt_state, params, i, model, tx):
+    loss_fn = partial(metric_util.loss_function_combined, model=model, norm=True, norm_step=i / 1e5)
+    loss_fn_wo_norm = partial(metric_util.loss_function_combined, model=model, norm=False)
+    loss_grad_fn = jax.value_and_grad(loss_fn)
+
+    train_loss, grads = loss_grad_fn(params, batch_train)
+    test_loss = loss_fn_wo_norm(params, batch_test)
+    train_loss2 = loss_fn_wo_norm(params, batch_train)
+
+    updates, opt_state = tx.update(grads, opt_state)
+    params = optax.apply_updates(params, updates)
+
+    return params, opt_state, train_loss, train_loss2, test_loss
+
+
+def test_learning(batch_graphs):
+    final_node_size = 7
+    final_edge_size = 4
+    final_global_size = 2
+
+    node_stack = [[4], [2], [final_node_size]]
+    edge_stack = [[4], [2], [final_edge_size]]
+    global_stack = [[4], [2], [final_global_size]]
+    attention_stack = [[4], [2], [7]]
+
+    rng = jax.random.key(42)
+    rng, init_rng = jax.random.split(rng)
+    model = mpg.MessagePassingGraph(node_stack, edge_stack, attention_stack, global_stack)
+    params = model.init(init_rng, batch_graphs)
+
+    tx = optax.adam(learning_rate=1e-5)
+    opt_state = tx.init(params)
+    partial_step = partial(train_step, model=model, tx=tx)
+    jit_step = jax.jit(partial_step)
+
+    for i in range(10):
+        params, opt_state, train_loss, train_loss2, test_loss = jit_step(batch_graphs, batch_graphs, opt_state, params, i)
+        print(i, train_loss, train_loss2, test_loss)
+
+    out_graph = model.apply(params, batch_graphs)
+    print(out_graph)

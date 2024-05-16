@@ -75,7 +75,7 @@ def loss_function_where_num(params, graph, model, num):
     return indeces
 
 
-def loss_function_combined(params, graph, model, norm=False, norm_step=-4.605170186):
+def loss_function_combined(params, graph, model, norm=False, norm_step=4.605170186):
     out_graph = model.apply(params, graph)
     metric_embeds = out_graph.globals[:-1]
 
@@ -87,7 +87,7 @@ def loss_function_combined(params, graph, model, norm=False, norm_step=-4.605170
     mean = jnp.nansum(matrix_before_sum) / (n * (n - 1))
 
     if norm:
-        mean += 100 * jnp.exp(-norm_step) * jnp.mean(metric_embeds**2)
+        mean += 10 * jnp.exp(-norm_step) * jnp.mean(metric_embeds**2)
 
     return mean
 

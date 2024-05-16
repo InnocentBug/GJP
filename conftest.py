@@ -1,7 +1,6 @@
 import os
 import tempfile
 
-import numpy as np
 import pytest
 
 from gjp import GraphData, batch_list, convert_to_jraph, metric_util
