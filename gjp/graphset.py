@@ -83,7 +83,7 @@ class GraphData:
         num_edges = self._np_rng.integers(low=min_edges, high=max_edges)
         while len(graph.edges()) < num_edges:
             u, v = self._np_rng.choice(range(num_nodes), 2)
-            graph.add_edge(u, v)
+            graph.add_edge(int(u), int(v))
 
         found_isomorph = self.check_graph_isomorph(graph)
         if not found_isomorph:
@@ -126,7 +126,7 @@ class GraphData:
 
         if change_similar_mode == 0:  # Add an edge
             u, v = self._np_rng.choice(range(num_nodes), 2)
-            new_graph.add_edge(u, v)
+            new_graph.add_edge(int(u), int(v))
 
         if change_similar_mode == 1:  # Remove an edge
             if len(new_graph.edges()) <= num_nodes:
@@ -140,10 +140,10 @@ class GraphData:
             edge = self._np_rng.choice(list(new_graph.edges()))
             new_graph.remove_edge(*edge)
             if self._np_rng.integers(2) == 0:
-                new_edge = (edge[0], self._np_rng.choice(range(num_nodes)))
+                new_edge = (edge[0], int(self._np_rng.choice(range(num_nodes))))
             else:
-                new_edge = (self._np_rng.choice(range(num_nodes)), edge[1])
-            new_graph.add_edge(*new_edge)
+                new_edge = (int(self._np_rng.choice(range(num_nodes))), edge[1])
+            new_graph.add_edge(int(new_edge[0]), int(new_edge[1]))
 
         found_isomorph = self.check_graph_isomorph(new_graph)
         if not found_isomorph:
@@ -209,19 +209,23 @@ class GraphData:
         return all_graphs[:train_size], all_graphs[train_size : train_size + test_size]
 
     def get_similar_feature_graphs(self, jraph_graph, num_graphs):
-        similar_graphs = []
-        while len(similar_graphs) < num_graphs:
-            if self._np_rng.integers(2) == 0:
-                node_idx = self._np_rng.integers(jraph_graph.nodes.shape[0])
-                new_nodes = jraph_graph.nodes.at[node_idx].set(self._np_rng.normal())
-                new_graph = jraph_graph._replace(nodes=new_nodes)
-            else:
-                edge_idx = self._np_rng.integers(jraph_graph.edges.shape[0])
-                new_edges = jraph_graph.edges.at[edge_idx].set(self._np_rng.normal())
-                new_graph = jraph_graph._replace(edges=new_edges)
-            similar_graphs += [new_graph]
-        self._np_rng.shuffle(similar_graphs)
-        return similar_graphs
+        return get_similar_feature_graphs(self._np_rng, jraph_graph, num_graphs)
+
+
+def get_similar_feature_graphs(rng, jraph_graph, num_graphs):
+    similar_graphs = []
+    while len(similar_graphs) < num_graphs:
+        if rng.integers(2) == 0:
+            node_idx = rng.integers(jraph_graph.nodes.shape[0])
+            new_nodes = jraph_graph.nodes.at[node_idx].set(rng.normal())
+            new_graph = jraph_graph._replace(nodes=new_nodes)
+        else:
+            edge_idx = rng.integers(jraph_graph.edges.shape[0])
+            new_edges = jraph_graph.edges.at[edge_idx].set(rng.normal())
+            new_graph = jraph_graph._replace(edges=new_edges)
+        similar_graphs += [new_graph]
+    rng.shuffle(similar_graphs)
+    return similar_graphs
 
 
 def convert_to_jraph(graphs, num_nodes_pad: int = None, num_edges_pad: int = None, calc_global_prop: bool = False):

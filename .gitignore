@@ -162,3 +162,5 @@ cython_debug/
 # ignore test shelves
 .test_*
 tests/.test_*
+
+test_graph_decoder*pdf
