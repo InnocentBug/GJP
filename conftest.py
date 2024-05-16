@@ -1,6 +1,7 @@
 import os
 import tempfile
 
+import jax
 import pytest
 
 from gjp import GraphData, batch_list, convert_to_jraph, metric_util
@@ -42,3 +43,8 @@ def similar_graphs(jraph_graphs, dataset):
 def batch_graphs(similar_graphs):
     num_nodes, num_edges = metric_util._count_nodes_edges(similar_graphs)
     return batch_list(similar_graphs, num_nodes + 1, num_edges + 1)[0]
+
+
+@pytest.fixture(scope="session")
+def jax_rng():
+    return jax.random.key(42)
