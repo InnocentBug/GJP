@@ -44,6 +44,7 @@ class MLP(nn.Module):
             x = nn.Dense(features=size)(x)
             x = self.activation(x)
             x = nn.Dropout(rate=self.dropout_rate, deterministic=self.deterministic)(x)
+            # x = nn.LayerNorm()(x)
         return x
 
 
