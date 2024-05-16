@@ -2,16 +2,8 @@ import jax
 import jax.numpy as jnp
 import jraph
 import pytest
-from flax.training.train_state import TrainState
 
-from gjp import (
-    GraphData,
-    MessagePassing,
-    batch_list,
-    convert_to_jraph,
-    metric_util,
-    model,
-)
+from gjp import MessagePassing, model
 
 
 def test_simple_pass(batch_graphs):
@@ -28,7 +20,9 @@ def test_simple_pass(batch_graphs):
     model = MessagePassing(node_stack, edge_stack, global_stack)
     params = model.init(init_rng, batch_graphs)
 
-    apply_model = lambda x: model.apply(params, x)
+    def apply_model(x):
+        return model.apply(params, x)
+
     out_graph = apply_model(batch_graphs)
     assert out_graph.nodes.shape[1] == final_node_size
     assert out_graph.edges.shape[1] == final_edge_size
@@ -50,7 +44,9 @@ def test_mean_instead_of_sum(batch_graphs, mean_instead_of_sum):
     model = MessagePassing(node_stack, edge_stack, global_stack, mean_instead_of_sum=mean_instead_of_sum)
     params = model.init(init_rng, batch_graphs)
 
-    apply_model = lambda x: model.apply(params, x)
+    def apply_model(x):
+        return model.apply(params, x)
+
     out_graph = apply_model(batch_graphs)
     assert out_graph.nodes.shape[1] == final_node_size
     assert out_graph.edges.shape[1] == final_edge_size
@@ -88,7 +84,9 @@ def test_stacks(batch_graphs, edge_stack, node_stack, global_stack):
     model = MessagePassing(node_stack, edge_stack, global_stack)
     params = model.init(init_rng, batch_graphs)
 
-    apply_model = lambda x: model.apply(params, x)
+    def apply_model(x):
+        return model.apply(params, x)
+
     out_graph = apply_model(batch_graphs)
     if node_stack:
         assert out_graph.nodes.shape[1] == final_node_size
