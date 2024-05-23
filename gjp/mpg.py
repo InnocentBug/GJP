@@ -1,6 +1,5 @@
 from typing import Dict, Optional, Sequence
 
-import jax
 import jax.numpy as jnp
 import jraph
 from flax import linen as nn
