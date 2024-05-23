@@ -1,5 +1,6 @@
 from typing import Dict, Optional, Sequence
 
+import jax
 import jax.numpy as jnp
 import jraph
 from flax import linen as nn
@@ -12,6 +13,7 @@ class MessagePassingGraphLayer(nn.Module):
     edge_stack: Optional[Sequence[int]] = None
     attention_stack: Optional[Sequence[int]] = None
     global_stack: Optional[Sequence[int]] = None
+    mean_aggregate: bool = True
     mlp_kwargs: Optional[Dict] = None
 
     def setup(self):
@@ -52,18 +54,22 @@ class MessagePassingGraphLayer(nn.Module):
         update_global = None
         node_to_global = None
         edge_to_global = None
+        self.aggregate_fn = jraph.segment_sum
+        if self.mean_aggregate:
+            self.aggregate_fn = jraph.segment_mean
+
         if self.global_stack:
             self.node_to_global_mlp = MLP(self.global_stack, **self._mlp_kwargs)
 
             def node_to_global(node_attributes, index, max_graph):
                 tmp_node = self.node_to_global_mlp(node_attributes)
-                return jraph.segment_mean(tmp_node, index, max_graph)
+                return self.aggregate_fn(tmp_node, index, max_graph)
 
             self.edge_to_global_mlp = MLP(self.global_stack, **self._mlp_kwargs)
 
             def edge_to_global(edge_attributes, index, max_graph):
                 tmp_edge = self.edge_to_global_mlp(edge_attributes)
-                return jraph.segment_mean(tmp_edge, index, max_graph)
+                self.aggregate_fn(tmp_edge, index, max_graph)
 
             self.global_mlp = MLP(self.global_stack, **self._mlp_kwargs)
 
@@ -73,7 +79,7 @@ class MessagePassingGraphLayer(nn.Module):
 
         self.graph_network = jraph.GraphNetwork(
             update_node_fn=update_nodes,
-            aggregate_edges_for_nodes_fn=jraph.segment_mean,
+            aggregate_edges_for_nodes_fn=self.aggregate_fn,
             update_edge_fn=update_edges,
             attention_logit_fn=attention_edges,
             attention_normalize_fn=attention_norm,
@@ -93,6 +99,7 @@ class MessagePassingGraph(nn.Module):
     edge_stack: Optional[Sequence[Optional[Sequence[int]]]] = None
     attention_stack: Optional[Sequence[Optional[Sequence[int]]]] = None
     global_stack: Optional[Sequence[Optional[Sequence[int]]]] = None
+    mean_aggregate: bool = True
     mlp_kwargs: Optional[Dict] = None
 
     def setup(self):
@@ -125,6 +132,7 @@ class MessagePassingGraph(nn.Module):
                 self.edge_stack[i] if self.edge_stack is not None else None,
                 self.attention_stack[i] if self.attention_stack is not None else None,
                 self.global_stack[i] if self.global_stack is not None else None,
+                self.mean_aggregate,
                 self.mlp_kwargs,
             )
             for i in range(size)

@@ -60,7 +60,8 @@ def test_message_passing_layer(batch_graphs, node_stack, edge_stack, attention_s
     assert jnp.allclose(a, b)
 
 
-def test_simple_pass(batch_graphs):
+@pytest.mark.parametrize("mean_aggregate", (True, False))
+def test_simple_pass(batch_graphs, mean_aggregate):
     final_node_size = 21
     final_edge_size = 34
     final_global_size = 42
@@ -72,7 +73,7 @@ def test_simple_pass(batch_graphs):
 
     rng = jax.random.key(42)
     rng, init_rng = jax.random.split(rng)
-    model = mpg.MessagePassingGraph(node_stack, edge_stack, attention_stack, global_stack)
+    model = mpg.MessagePassingGraph(node_stack, edge_stack, attention_stack, global_stack, mean_aggregate)
     params = model.init(init_rng, batch_graphs)
 
     apply_model = jax.jit(lambda x: model.apply(params, x))
