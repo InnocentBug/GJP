@@ -57,7 +57,6 @@ class InitialBagEdges(nn.Module):
         self.init_edge_mlp = MLP(self.mlp_size[:-1] + (int(self.max_nodes) * int(self.max_nodes) * int(self.multi_edge_repeat * self.mlp_size[-1]),), **self._mlp_kwargs)
 
         def _init_edge_features(sub_x):
-            n_node = sub_x[-2]
             sub_x = sub_x[:-2]
 
             features = self.init_edge_mlp(sub_x).reshape(int(self.max_nodes) * int(self.max_nodes) * int(self.multi_edge_repeat), self.mlp_size[-1])
@@ -169,7 +168,7 @@ class GraphBagDecoder(nn.Module):
             new_edges = jax.nn.softmax(edges) * (jnp.arange(self.max_edges) < double_n_edge[0]).astype(int)
             new_edges = new_edges / jnp.sum(new_edges)
 
-            edge_sort_idx = jnp.argsort(new_edges, stable=True)
+            edge_sort_idx = jnp.argsort(new_edges, stable=True, descending=True)
 
             new_edges = new_edges[edge_sort_idx]
 
@@ -189,7 +188,6 @@ class GraphBagDecoder(nn.Module):
         self.final_mpg = MessagePassingGraph(node_stack=self.final_mpg_stack, edge_stack=self.final_mpg_stack, attention_stack=self.final_mpg_stack, global_stack=None, mean_aggregate=True, mlp_kwargs=self.mlp_kwargs)
 
     def __call__(self, x):
-        n_node = x[:, -2]
         n_edge = x[:, -1]
 
         tmp_graphs = self.init_graph_decoder(x)
@@ -200,12 +198,21 @@ class GraphBagDecoder(nn.Module):
 
         graph_senders = tmp_graphs.senders.reshape(x.shape[0], self.max_edges)
         graph_receivers = tmp_graphs.receivers.reshape(x.shape[0], self.max_edges)
+
+        graph_senders = graph_senders - jnp.arange(x.shape[0], dtype=int)[:, None] * int(self.max_nodes)
+        graph_receivers = graph_receivers - jnp.arange(x.shape[0], dtype=int)[:, None] * int(self.max_nodes)
+
         double_n_node = tmp_graphs.n_node.reshape(x.shape[0], 2)
         double_n_edge = tmp_graphs.n_edge.reshape(x.shape[0], 2)
 
         reduced_nodes, reduced_edges, reduced_senders, reduced_receivers, reduced_n_edge = self.reduce_graph(graph_nodes, graph_edges, graph_senders, graph_receivers, double_n_node, double_n_edge, n_edge)
 
-        tmp_graphs._replace(nodes=reduced_nodes.reshape(reduced_nodes.size, 1), edges=reduced_edges.reshape(reduced_edges.size, 1), senders=reduced_senders.flatten(), receivers=reduced_receivers.flatten(), n_edge=reduced_n_edge.flatten())
+        reduced_senders = reduced_senders + jnp.arange(x.shape[0], dtype=int)[:, None] * int(self.max_nodes)
+        reduced_receivers = reduced_receivers + jnp.arange(x.shape[0], dtype=int)[:, None] * int(self.max_nodes)
+
+        tmp_graphs = tmp_graphs._replace(
+            nodes=reduced_nodes.reshape(reduced_nodes.size, 1), edges=reduced_edges.reshape(reduced_edges.size, 1), senders=reduced_senders.flatten(), receivers=reduced_receivers.flatten(), n_edge=reduced_n_edge.flatten()
+        )
 
         final_graphs = self.final_mpg(tmp_graphs)
         return final_graphs

@@ -6,9 +6,8 @@ import jax.numpy as jnp
 import jraph
 import pytest
 from flax import linen as nn
-from flax.training.train_state import TrainState
 
-from gjp import bag_decoder, metric_util
+from gjp import bag_decoder, metric_util, mpg
 
 jax.config.update("jax_platform_name", "cpu")
 
@@ -89,7 +88,6 @@ def test_full_edge_decoder(max_num_nodes, multi_edge_repeat, stack, jax_rng):
         )
     )
 
-    print(max_num_nodes, n_node_edge)
     for i in range(graph_num):
         g_senders = senders[i]
         assert jnp.min(g_senders) == i * max_num_nodes
@@ -118,7 +116,7 @@ def test_init_bag_graph(max_num_nodes, multi_edge_repeat, stack, mpg_stack, jax_
     rng, init_rng, dropout_rng, node_rng = jax.random.split(rng, 4)
     n_node = jax.random.randint(node_rng, (graph_num,), 2, max_num_nodes - 1)
     n_edge = []
-    for i, n in enumerate(n_node):
+    for n in n_node:
         n_edge.append(jax.random.randint(node_rng, (1,), 2, (n) ** 2 * multi_edge_repeat)[0])
         rng, node_rng = jax.random.split(rng)
     n_edge = jnp.asarray(n_edge, dtype=int)
@@ -178,7 +176,7 @@ def test_init_bag_graph(max_num_nodes, multi_edge_repeat, stack, mpg_stack, jax_
 @pytest.mark.parametrize("max_num_nodes, multi_edge_repeat, stack, mpg_stack", [(5, 1, [15, 76, 65, 1], [[2], [2, 4]]), (6, 2, [15, 7], [[11], [2, 3], [3]]), (10, 3, [2], [[2], [4], [5], [3], [2]])])
 def test_bag_graph_decode(max_num_nodes, multi_edge_repeat, stack, mpg_stack, jax_rng, ensure_tempfile):
     print("")
-    graph_num = 1
+    graph_num = 7
     rng = jax_rng
     for _ in range(graph_num + max_num_nodes):
         rng, _ = jax.random.split(rng)
@@ -186,7 +184,7 @@ def test_bag_graph_decode(max_num_nodes, multi_edge_repeat, stack, mpg_stack, ja
     rng, init_rng, dropout_rng, node_rng = jax.random.split(rng, 4)
     n_node = jax.random.randint(node_rng, (graph_num,), 2, max_num_nodes - 1)
     n_edge = []
-    for i, n in enumerate(n_node):
+    for n in n_node:
         n_edge.append(jax.random.randint(node_rng, (1,), 2, (n) ** 2 * multi_edge_repeat)[0])
         rng, node_rng = jax.random.split(rng)
     n_edge = jnp.asarray(n_edge, dtype=int)
@@ -214,29 +212,46 @@ def test_bag_graph_decode(max_num_nodes, multi_edge_repeat, stack, mpg_stack, ja
     original_path, _ = ensure_tempfile
     metric_util.svg_graph_list(unbatch_nodes, filename=os.path.join(original_path, f"final_decode_graph{m.hexdigest(3)}.pdf"))
 
-    # for i, graph in enumerate(unbatch_nodes):
-    #     if i % 2 == 0:
-    #         vals, count = jnp.unique(graph.senders, return_counts=True)
-    #         assert jnp.min(vals) == 0
-    #         assert jnp.max(vals) == graph.n_node[0]-1
-    #         assert len(vals) == graph.n_node[0]
-    #         assert jnp.allclose(jnp.ones(count.shape) * graph.n_node[0] * multi_edge_repeat, count)
+    for i, graph in enumerate(unbatch_nodes):
+        if i % 2 == 0:
+            vals, count = jnp.unique(graph.senders, return_counts=True)
+            assert jnp.min(vals) >= 0
+            assert jnp.max(vals) <= graph.n_node[0] - 1
 
-    #         vals, count = jnp.unique(graph.receivers, return_counts=True)
-    #         assert jnp.min(vals) == 0
-    #         assert jnp.max(vals) == graph.n_node[0]-1
-    #         assert len(vals) == graph.n_node[0]
-    #         assert jnp.allclose(jnp.ones(count.shape) * graph.n_node[0] * multi_edge_repeat, count)
-    #     else:
-    #         assert jnp.allclose(jnp.zeros(graph.senders.shape), graph.senders)
-    #         assert jnp.allclose(jnp.zeros(graph.receivers.shape), graph.receivers)
+            vals, count = jnp.unique(graph.receivers, return_counts=True)
+            assert jnp.min(vals) >= 0
+            assert jnp.max(vals) <= graph.n_node[0] - 1
+        else:
+            assert jnp.allclose(jnp.zeros(graph.senders.shape), graph.senders)
+            assert jnp.allclose(jnp.zeros(graph.receivers.shape), graph.receivers)
 
-    # rng, dropout_rng = jax.random.split(rng)
-    # def dummy_loss(params, graph):
-    #     out_graph = model.apply(params, graph, rngs={"dropout": dropout_rng})
-    #     return jnp.sum(out_graph.nodes) + jnp.sum(out_graph.edges)
+    rng, dropout_rng = jax.random.split(rng)
 
-    # # Ensure we have gradients on all our params
-    # grads = jax.grad(dummy_loss)(params, test_input)
-    # for leaf in jax.tree_util.tree_leaves(grads):
-    #     assert jnp.sum(jnp.abs(leaf)) > 1e-12
+    def dummy_loss(params, graph):
+        out_graph = model.apply(params, graph, rngs={"dropout": dropout_rng})
+        return jnp.sum(out_graph.nodes) + jnp.sum(out_graph.edges)
+
+    # Ensure we have gradients on all our params
+    grads = jax.grad(dummy_loss)(params, test_input)
+    for leaf in jax.tree_util.tree_leaves(grads):
+        assert jnp.sum(jnp.abs(leaf)) > 1e-18
+
+    metric_model = mpg.MessagePassingGraph(
+        node_stack=mpg_stack,
+        edge_stack=mpg_stack,
+        attention_stack=mpg_stack,
+        global_stack=mpg_stack,
+    )
+    rng, la_rng = jax.random.split(rng)
+    metric_params = metric_model.init(la_rng, out_graphs)
+
+    def global_loss(params, in_data):
+        out_graph = model.apply(params, in_data, rngs={"dropout": dropout_rng})
+        out_graph = out_graph._replace(globals=out_graph.globals * 0)
+
+        metric_out = metric_model.apply(metric_params, out_graph)
+        return jnp.mean(metric_out.globals)
+
+    grads = jax.grad(global_loss)(params, test_input)
+    for leaf in jax.tree_util.tree_leaves(grads):
+        assert jnp.sum(jnp.abs(leaf)) > 1e-18
