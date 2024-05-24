@@ -8,15 +8,7 @@ import optax
 import pytest
 from flax.training.train_state import TrainState
 
-from gjp import (
-    GraphData,
-    MessagePassing,
-    bag_gae,
-    batch_list,
-    convert_to_jraph,
-    metric_util,
-    mpg,
-)
+from gjp import bag_gae, mpg
 
 MLP_KWARGS = {"dropout_rate": 0.1, "deterministic": False, "activation": nn.sigmoid}
 
@@ -61,22 +53,6 @@ def test_bag_gae(batch_graphs):
         assert out_graph.n_edge[0] <= in_graph.n_edge[0]
 
 
-def train_step(batch_train, batch_test, train_state, rng, norm, metric_state):
-    loss_fn = partial(bag_gae.loss_function, metric_state=metric_state, norm=norm)
-    loss_grad_fn = jax.value_and_grad(loss_fn)
-
-    rng, rng_a, rng_b = jax.random.split(rng, 3)
-    rngs = {"reparametrize": rng_a, "dropout": rng_b}
-    train_loss, grads = loss_grad_fn(train_state.params, train_state, batch_train, rngs)
-    rng, rng_a, rng_b = jax.random.split(rng, 3)
-    rngs = {"reparametrize": rng_a, "dropout": rng_b}
-    test_loss = loss_fn(train_state.params, train_state, batch_test, rngs)
-
-    train_state = train_state.apply_gradients(grads=grads)
-
-    return train_state, train_loss, test_loss
-
-
 @pytest.mark.parametrize("norm", [True, False])
 def test_bag_loss_function(batch_graphs, norm):
     max_num_nodes = jnp.max(batch_graphs.n_node) + 1
@@ -103,7 +79,7 @@ def test_bag_loss_function(batch_graphs, norm):
     tx = optax.adam(learning_rate=1e-3)
     opt_state = tx.init(params)
     train_state = TrainState(step=0, apply_fn=model.apply, params=params, tx=tx, opt_state=opt_state)
-    out_graphs = train_state.apply_fn(train_state.params, batch_graphs, rngs={"reparametrize": rng_split_a, "dropout": rng_split_b})
+    train_state.apply_fn(train_state.params, batch_graphs, rngs={"reparametrize": rng_split_a, "dropout": rng_split_b})
 
     metric_model = mpg.MessagePassingGraph(
         node_stack=mpg_stack,
@@ -115,11 +91,11 @@ def test_bag_loss_function(batch_graphs, norm):
     metric_params = metric_model.init(rng_split, batch_graphs)
     metric_state = TrainState(apply_fn=metric_model.apply, params=metric_params, step=None, tx=None, opt_state=None)
 
-    partial_step = partial(train_step, metric_state=metric_state, norm=norm)
+    partial_step = partial(bag_gae.train_step, metric_state=metric_state, norm=norm)
     func = jax.jit(partial_step)
 
     for _ in range(3):
-        train_state, train_loss, test_loss = func(batch_graphs, batch_graphs, train_state, rng=rng_split)
+        train_state, train_loss, train_loss_a, train_loss_b, test_loss_a, test_loss_b = func(batch_graphs, batch_graphs, train_state, rng=rng_split)
         rng, rng_split = jax.random.split(rng)
 
-        print(train_loss, test_loss)
+        print(train_loss, train_loss_a, train_loss_b, test_loss_a, test_loss_b)

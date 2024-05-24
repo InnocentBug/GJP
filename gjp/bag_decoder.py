@@ -165,24 +165,29 @@ class GraphBagDecoder(nn.Module):
             multi_edge_repeat=self.multi_edge_repeat,
             mlp_kwargs=self.mlp_kwargs,
         )
-        # self.init_node_mlp = MLP(self.init_node_stack[:-1] + (self.init_node_stack[-1] * int(self.max_nodes),), **self._mlp_kwargs)
+        self.init_node_mlp = MLP(self.init_node_stack[:-1] + (self.init_node_stack[-1] * int(self.max_nodes),), **self._mlp_kwargs)
 
-        # self.init_edge_mlp = MLP(self.init_edge_stack[:-1] + (self.init_edge_stack[-1] * int(self.max_edges),), **self._mlp_kwargs)
+        self.init_edge_mlp = MLP(self.init_edge_stack[:-1] + (self.init_edge_stack[-1] * int(self.max_edges),), **self._mlp_kwargs)
 
         def _reduce_graph(x, nodes, edges, senders, receivers, n_node, double_n_edge, n_edge):
             new_nodes = jax.nn.softmax(nodes) * (jnp.arange(self.max_nodes) < n_node[0]).astype(int)
             new_nodes = new_nodes / jnp.sum(new_nodes)
 
-            # # Use MLP to make new nodes features (decouple from probabilities)
-            # new_nodes = self.init_node_mlp(x[:-2]).reshape(self.max_nodes, self.init_node_stack[-1])
+            # Use MLP to make new nodes features (decouple from probabilities)
+            # Use the probabilities as kind of an attention layer
+            new_mlp_nodes = self.init_node_mlp(x[:-2]).reshape(self.max_nodes, self.init_node_stack[-1])
+
+            new_nodes = new_nodes[:, None] * new_mlp_nodes
 
             new_edges = jax.nn.softmax(edges) * (jnp.arange(self.max_edges) < double_n_edge[0]).astype(int)
             new_edges = new_edges / jnp.sum(new_edges)
 
             edge_sort_idx = jnp.argsort(new_edges, stable=True, descending=True)
 
-            # # Use MLP to make edge features (decouple from probabilities)
-            # new_edges = self.init_edge_mlp(x[:-2]).reshape(self.max_edges, self.init_edge_stack[-1])
+            # Use MLP to make edge features (decouple from probabilities)
+            # Use the softmax as kind of an attention layer
+            new_mlp_edges = self.init_edge_mlp(x[:-2]).reshape(self.max_edges, self.init_edge_stack[-1])
+            new_edges = new_edges[:, None] * new_mlp_edges
 
             new_edges = new_edges[edge_sort_idx]
 
@@ -225,7 +230,11 @@ class GraphBagDecoder(nn.Module):
         reduced_receivers = reduced_receivers + jnp.arange(x.shape[0], dtype=int)[:, None] * int(self.max_nodes)
 
         tmp_graphs = tmp_graphs._replace(
-            nodes=reduced_nodes.reshape(reduced_nodes.size, 1), edges=reduced_edges.reshape(reduced_edges.size, 1), senders=reduced_senders.flatten(), receivers=reduced_receivers.flatten(), n_edge=reduced_n_edge.flatten()
+            nodes=reduced_nodes.reshape(x.shape[0] * int(self.max_nodes), reduced_nodes.shape[-1]),
+            edges=reduced_edges.reshape(x.shape[0] * int(self.max_edges), reduced_edges.shape[-1]),
+            senders=reduced_senders.flatten(),
+            receivers=reduced_receivers.flatten(),
+            n_edge=reduced_n_edge.flatten(),
         )
 
         final_graphs = self.final_mpg(tmp_graphs)

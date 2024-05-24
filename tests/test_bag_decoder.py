@@ -235,7 +235,6 @@ def test_bag_graph_decode(max_num_nodes, multi_edge_repeat, stack, mpg_stack, ja
 
     # Ensure we have gradients on all our params
     grads = jax.grad(dummy_loss)(params, test_input)
-    print(grads)
     for leaf in jax.tree_util.tree_leaves(grads):
         assert jnp.sum(jnp.abs(leaf)) > 0
 
