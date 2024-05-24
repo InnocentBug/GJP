@@ -146,7 +146,8 @@ class GraphBagDecoder(nn.Module):
     init_node_stack: Sequence[int]
     init_edge_stack: Sequence[int]
     init_mpg_stack: Sequence[Sequence[int]]
-    final_mpg_stack: Sequence[Sequence[int]]
+    final_mpg_edge_stack: Sequence[Sequence[int]]
+    final_mpg_node_stack: Sequence[Sequence[int]]
     multi_edge_repeat: int = 1
     mlp_kwargs: dict[str, Any] | None = None
 
@@ -185,7 +186,7 @@ class GraphBagDecoder(nn.Module):
 
         self.reduce_graph = jax.vmap(_reduce_graph)
 
-        self.final_mpg = MessagePassingGraph(node_stack=self.final_mpg_stack, edge_stack=self.final_mpg_stack, attention_stack=self.final_mpg_stack, global_stack=None, mean_aggregate=True, mlp_kwargs=self.mlp_kwargs)
+        self.final_mpg = MessagePassingGraph(node_stack=self.final_mpg_node_stack, edge_stack=self.final_mpg_edge_stack, attention_stack=self.final_mpg_edge_stack, global_stack=None, mean_aggregate=True, mlp_kwargs=self.mlp_kwargs)
 
     def __call__(self, x):
         n_edge = x[:, -1]

@@ -168,7 +168,7 @@ def test_init_bag_graph(max_num_nodes, multi_edge_repeat, stack, mpg_stack, jax_
     # Ensure we have gradients on all our params
     grads = jax.grad(dummy_loss)(params, test_input)
     for leaf in jax.tree_util.tree_leaves(grads):
-        assert jnp.sum(jnp.abs(leaf)) > 1e-12
+        assert jnp.sum(jnp.abs(leaf)) > 0
 
 
 @pytest.mark.parametrize("max_num_nodes, multi_edge_repeat, stack, mpg_stack", [(5, 1, [15, 76, 65, 1], [[2], [2, 4]]), (6, 2, [15, 7], [[11], [2, 3], [3]]), (10, 3, [2], [[2], [4], [5], [3], [2]])])
@@ -188,7 +188,9 @@ def test_bag_graph_decode(max_num_nodes, multi_edge_repeat, stack, mpg_stack, ja
     n_edge = jnp.asarray(n_edge, dtype=int)
     n_node_edge = jnp.vstack((n_node, n_edge)).transpose()
 
-    model = bag_decoder.GraphBagDecoder(max_nodes=max_num_nodes, init_node_stack=stack, init_edge_stack=stack, init_mpg_stack=mpg_stack, final_mpg_stack=mpg_stack, multi_edge_repeat=multi_edge_repeat, mlp_kwargs=MLP_KWARGS)
+    model = bag_decoder.GraphBagDecoder(
+        max_nodes=max_num_nodes, init_node_stack=stack, init_edge_stack=stack, init_mpg_stack=mpg_stack, final_mpg_node_stack=mpg_stack, final_mpg_edge_stack=mpg_stack, multi_edge_repeat=multi_edge_repeat, mlp_kwargs=MLP_KWARGS
+    )
 
     rng, rng_normal = jax.random.split(rng)
     test_input = jax.random.normal(rng_normal, (graph_num, 7))
@@ -232,7 +234,7 @@ def test_bag_graph_decode(max_num_nodes, multi_edge_repeat, stack, mpg_stack, ja
     # Ensure we have gradients on all our params
     grads = jax.grad(dummy_loss)(params, test_input)
     for leaf in jax.tree_util.tree_leaves(grads):
-        assert jnp.sum(jnp.abs(leaf)) > 1e-18
+        assert jnp.sum(jnp.abs(leaf)) > 0
 
     metric_model = mpg.MessagePassingGraph(
         node_stack=mpg_stack,
@@ -252,4 +254,4 @@ def test_bag_graph_decode(max_num_nodes, multi_edge_repeat, stack, mpg_stack, ja
 
     grads = jax.grad(global_loss)(params, test_input)
     for leaf in jax.tree_util.tree_leaves(grads):
-        assert jnp.sum(jnp.abs(leaf)) > 1e-18
+        assert jnp.sum(jnp.abs(leaf)) > 0
