@@ -91,16 +91,16 @@ def test_full_edge_decoder(max_num_nodes, multi_edge_repeat, stack, jax_rng):
         assert jnp.min(g_senders) == i * max_num_nodes
         assert jnp.max(g_senders) <= (i + 1) * max_num_nodes - 1
 
-        g_senders = g_senders - i * max_num_nodes
+        # g_senders = g_senders - i * max_num_nodes
 
         g_receivers = receivers[i]
         assert jnp.min(g_receivers) == i * max_num_nodes
         assert jnp.max(g_receivers) <= (i + 1) * max_num_nodes - 1
 
-        g_receivers = g_receivers - i * max_num_nodes
+        # g_receivers = g_receivers - i * max_num_nodes
 
-        print(i, g_senders)
-        print(i, g_receivers)
+        # print(i, g_senders)
+        # print(i, g_receivers)
 
 
 @pytest.mark.parametrize("max_num_nodes, multi_edge_repeat, stack, mpg_stack", [(5, 1, [15, 76, 65, 1], [[2], [2, 4]]), (6, 2, [15, 7], [[11], [2, 3], [3]]), (10, 3, [2], [[2], [4], [5], [3], [2]])])
@@ -166,7 +166,9 @@ def test_init_bag_graph(max_num_nodes, multi_edge_repeat, stack, mpg_stack, jax_
         return jnp.sum(out_graph.nodes) + jnp.sum(out_graph.edges)
 
     # Ensure we have gradients on all our params
-    grads = jax.grad(dummy_loss)(params, test_input)
+    func = jax.jit(jax.grad(dummy_loss))
+    func(params, test_input)
+    grads = func(params, test_input)
     for leaf in jax.tree_util.tree_leaves(grads):
         assert jnp.sum(jnp.abs(leaf)) > 0
 
@@ -233,6 +235,7 @@ def test_bag_graph_decode(max_num_nodes, multi_edge_repeat, stack, mpg_stack, ja
 
     # Ensure we have gradients on all our params
     grads = jax.grad(dummy_loss)(params, test_input)
+    print(grads)
     for leaf in jax.tree_util.tree_leaves(grads):
         assert jnp.sum(jnp.abs(leaf)) > 0
 
@@ -252,6 +255,8 @@ def test_bag_graph_decode(max_num_nodes, multi_edge_repeat, stack, mpg_stack, ja
         metric_out = metric_model.apply(metric_params, out_graph)
         return jnp.mean(metric_out.globals)
 
-    grads = jax.grad(global_loss)(params, test_input)
+    func = jax.jit(jax.grad(global_loss))
+    func(params, test_input)
+    grads = func(params, test_input)
     for leaf in jax.tree_util.tree_leaves(grads):
         assert jnp.sum(jnp.abs(leaf)) > 0

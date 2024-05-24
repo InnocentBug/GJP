@@ -19,7 +19,8 @@ class InitialNodeBag(nn.Module):
         if self._mlp_kwargs is None:
             self._mlp_kwargs = {}
 
-        self.node_bag_mlp = MLP(self.mlp_size[:-1] + (self.mlp_size[-1] * self.max_nodes,), **self._mlp_kwargs)
+        new_stack = self.mlp_size[:-1] + (int(self.mlp_size[-1]) * int(self.max_nodes),)
+        self.node_bag_mlp = MLP(new_stack, **self._mlp_kwargs)
 
         def _init_nodes(sub_x):
             # Strip off n_node, n_edges
@@ -68,11 +69,11 @@ class InitialBagEdges(nn.Module):
             n_node = sub_x[-2]
             edge_range = jnp.arange(self.max_nodes, dtype=int)
 
-            senders = jnp.repeat(edge_range, self.max_nodes)
-            receivers = jnp.repeat(edge_range.reshape(1, self.max_nodes), self.max_nodes, axis=0).flatten()
+            senders = jnp.repeat(edge_range, int(self.max_nodes))
+            receivers = jnp.repeat(edge_range.reshape(1, self.max_nodes), int(self.max_nodes), axis=0).flatten()
 
-            senders = jnp.repeat(senders, self.multi_edge_repeat)
-            receivers = jnp.repeat(receivers, self.multi_edge_repeat)
+            senders = jnp.repeat(senders, int(self.multi_edge_repeat))
+            receivers = jnp.repeat(receivers, int(self.multi_edge_repeat))
 
             logic = jnp.logical_or(senders >= n_node, receivers >= n_node)
             senders = senders * ~logic + (n_node) * logic
@@ -115,7 +116,7 @@ class InitialGraphBagDecoder(nn.Module):
         )
 
     def __call__(self, x):
-        n_node = x[:, -2]
+        n_node = x[:, -2].astype(int)
 
         n_edge_max: int = int(self.max_nodes) ** 2 * int(self.multi_edge_repeat)
         n_edge_tmp = (n_node) ** 2 * int(self.multi_edge_repeat)
@@ -137,7 +138,6 @@ class InitialGraphBagDecoder(nn.Module):
         )
 
         out_graph = self.init_mpg(initial_graph)
-
         return out_graph
 
 
@@ -152,7 +152,10 @@ class GraphBagDecoder(nn.Module):
     mlp_kwargs: dict[str, Any] | None = None
 
     def setup(self):
-        self.max_edges = self.max_nodes**2 * self.multi_edge_repeat
+        self._mlp_kwargs = self.mlp_kwargs
+        if self.mlp_kwargs is None:
+            self._mlp_kwargs = {}
+        self.max_edges = int(self.max_nodes) ** 2 * int(self.multi_edge_repeat)
 
         self.init_graph_decoder = InitialGraphBagDecoder(
             max_nodes=self.max_nodes,
@@ -162,14 +165,24 @@ class GraphBagDecoder(nn.Module):
             multi_edge_repeat=self.multi_edge_repeat,
             mlp_kwargs=self.mlp_kwargs,
         )
+        # self.init_node_mlp = MLP(self.init_node_stack[:-1] + (self.init_node_stack[-1] * int(self.max_nodes),), **self._mlp_kwargs)
 
-        def _reduce_graph(nodes, edges, senders, receivers, n_node, double_n_edge, n_edge):
+        # self.init_edge_mlp = MLP(self.init_edge_stack[:-1] + (self.init_edge_stack[-1] * int(self.max_edges),), **self._mlp_kwargs)
+
+        def _reduce_graph(x, nodes, edges, senders, receivers, n_node, double_n_edge, n_edge):
             new_nodes = jax.nn.softmax(nodes) * (jnp.arange(self.max_nodes) < n_node[0]).astype(int)
             new_nodes = new_nodes / jnp.sum(new_nodes)
+
+            # # Use MLP to make new nodes features (decouple from probabilities)
+            # new_nodes = self.init_node_mlp(x[:-2]).reshape(self.max_nodes, self.init_node_stack[-1])
+
             new_edges = jax.nn.softmax(edges) * (jnp.arange(self.max_edges) < double_n_edge[0]).astype(int)
             new_edges = new_edges / jnp.sum(new_edges)
 
             edge_sort_idx = jnp.argsort(new_edges, stable=True, descending=True)
+
+            # # Use MLP to make edge features (decouple from probabilities)
+            # new_edges = self.init_edge_mlp(x[:-2]).reshape(self.max_edges, self.init_edge_stack[-1])
 
             new_edges = new_edges[edge_sort_idx]
 
@@ -206,7 +219,7 @@ class GraphBagDecoder(nn.Module):
         double_n_node = tmp_graphs.n_node.reshape(x.shape[0], 2)
         double_n_edge = tmp_graphs.n_edge.reshape(x.shape[0], 2)
 
-        reduced_nodes, reduced_edges, reduced_senders, reduced_receivers, reduced_n_edge = self.reduce_graph(graph_nodes, graph_edges, graph_senders, graph_receivers, double_n_node, double_n_edge, n_edge)
+        reduced_nodes, reduced_edges, reduced_senders, reduced_receivers, reduced_n_edge = self.reduce_graph(x, graph_nodes, graph_edges, graph_senders, graph_receivers, double_n_node, double_n_edge, n_edge)
 
         reduced_senders = reduced_senders + jnp.arange(x.shape[0], dtype=int)[:, None] * int(self.max_nodes)
         reduced_receivers = reduced_receivers + jnp.arange(x.shape[0], dtype=int)[:, None] * int(self.max_nodes)
