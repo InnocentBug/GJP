@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jraph
 import pytest
 
-from gjp import edge_weight_decoder
+from gjp import bag_gae, edge_weight_decoder
 
 
 @pytest.mark.parametrize("max_num_nodes, multi_edge_repeat", [(5, 1), (6, 2), (10, 3)])
@@ -17,12 +17,11 @@ def test_full_edge_decoder(max_num_nodes, multi_edge_repeat, jax_rng):
     test_input = jnp.hstack((test_input, n_node_edge))
 
     model = edge_weight_decoder.FullyConnectedGraph(max_num_nodes, multi_edge_repeat)
-    params = model.init(rng, test_input)
 
-    apply_model = jax.jit(model.apply)
-    apply_model(params, test_input)
+    apply_model = jax.jit(model.__call__)
+    apply_model(test_input)
     rng, dropout_rng = jax.random.split(rng)
-    out_graph = apply_model(params, test_input, rngs={"dropout": dropout_rng})
+    out_graph = apply_model(test_input)
 
     assert out_graph.senders.shape == (graph_num * max_num_nodes**2 * multi_edge_repeat,)
     assert out_graph.receivers.shape == (graph_num * max_num_nodes**2 * multi_edge_repeat,)
@@ -60,3 +59,12 @@ def test_full_edge_decoder(max_num_nodes, multi_edge_repeat, jax_rng):
 
         assert jnp.sum(jnp.abs(fill_graph.senders)) < 1e-6
         assert jnp.sum(jnp.abs(fill_graph.receivers)) < 1e-6
+
+
+def test_make_graph_fully_connected(batch_graphs):
+    multi_edge_repeat = bag_gae.find_multi_edge_repeat(batch_graphs)
+    print(multi_edge_repeat)
+
+    fully_graph = edge_weight_decoder.make_graph_fully_connected(batch_graphs, multi_edge_repeat)
+
+    print(fully_graph)

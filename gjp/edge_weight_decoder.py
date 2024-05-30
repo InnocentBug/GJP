@@ -1,12 +1,18 @@
+from dataclasses import dataclass
+
 import jax
 import jax.numpy as jnp
 import jraph
 from flax import linen as nn
 
 
-class FullyConnectedGraph(nn.Module):
+@dataclass
+class FullyConnectedGraph:
     max_nodes: int
     multi_edge_repeat: int = 1
+
+    def __post_init__(self):
+        self.setup()
 
     def setup(self):
         self.max_edges = int(self.max_nodes) ** 2 * int(self.multi_edge_repeat)
@@ -44,3 +50,20 @@ class FullyConnectedGraph(nn.Module):
 
         graph = jraph.GraphsTuple(nodes=None, edges=None, senders=senders.flatten().astype(int), receivers=receivers.flatten().astype(int), n_edge=n_edge.flatten().astype(int), n_node=n_node.flatten().astype(int), globals=None)
         return graph
+
+
+def make_graph_fully_connected(graph, multi_edge_repeat):
+    max_nodes = jnp.max(graph.n_node)
+
+    graph_generator = FullyConnectedGraph(max_nodes, multi_edge_repeat)
+    input_data = jnp.vstack([graph.n_node, graph.n_edge], dtype=int).transpose()
+
+    new_graph = graph_generator(input_data)
+
+    cumsum_end = jnp.cumsum(graph.n_node, dtype=int)
+    cumsum_start = jnp.concatenate([[0], cumsum_end[:-1]])
+
+    idx = jnp.vstack([cumsum_start, cumsum_end])
+    print(idx)
+
+    return new_graph
