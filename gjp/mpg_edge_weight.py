@@ -88,6 +88,7 @@ class MessagePassingLayerEW(nn.Module):
             edge_weights = edge_weights.reshape((edge_weights.shape[0], 1))
             send_node_feature = edge_weights[graph.senders] * graph.nodes[graph.senders]
             recv_node_feature = edge_weights[graph.receivers] * graph.nodes[graph.receivers]
+            print(graph.nodes, graph.receivers, edge_weights[graph.receivers])
             edge_features = edge_weights * graph.edges
         else:
             send_node_feature = graph.nodes[graph.senders]
@@ -96,9 +97,13 @@ class MessagePassingLayerEW(nn.Module):
 
         global_features = graph.globals
 
+        print("w", edge_weights)
+        print("recv", recv_node_feature)
+
         edge_repeat_global = jnp.repeat(global_features, graph.n_edge, axis=0, total_repeat_length=graph.receivers.shape[0])
 
         concat_args = jnp.hstack([send_node_feature, recv_node_feature, edge_features, edge_repeat_global])
+        print("concat", concat_args)
 
         # Nodes
         if self.node_feature_sizes is not None:
@@ -185,7 +190,7 @@ class MessagePassingEW(nn.Module):
             for i in range(size)
         ]
 
-    def __call__(self, in_graphs, edge_weights):
+    def __call__(self, in_graphs, edge_weights=None):
         tmp_graphs = in_graphs
         for layer in self.msg_layers:
             tmp_graphs = layer(tmp_graphs, edge_weights)

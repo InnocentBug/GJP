@@ -7,7 +7,7 @@ import pytest
 from flax.training.train_state import TrainState
 from utils import compare_graphs
 
-from gjp import MLP, mpg_edge_weight
+from gjp import MLP, bag_gae, edge_weight_decoder, mpg_edge_weight
 
 
 @pytest.mark.parametrize("final_size", [1, 10, 100])
@@ -120,3 +120,49 @@ def test_ew_message_passing_layer(batch_graphs, node_stack, edge_stack, global_s
     # print(batch_graphs.globals)
     # print(out_graphs.globals)
     # print(out_graphs2.globals)
+
+
+@pytest.mark.parametrize("mpg_stack", [[None, [1, 2], [3, 4]], None, [[2], [3], [4]]])
+def test_edge_weigth_metric(jax_rng, batch_graphs, mpg_stack):
+    multi_edge_repeat = bag_gae.find_multi_edge_repeat(batch_graphs)
+    fully_graph, edge_weights = edge_weight_decoder.make_graph_fully_connected(batch_graphs, multi_edge_repeat)
+
+    model = mpg_edge_weight.MessagePassingEW(node_feature_sizes=mpg_stack, edge_feature_sizes=mpg_stack, global_feature_sizes=mpg_stack)
+
+    params = model.init(jax_rng, batch_graphs)
+
+    result_a = model.apply(params, batch_graphs).globals
+    result_b = model.apply(params, fully_graph, edge_weights).globals[::2]
+
+    assert result_a.shape == result_b.shape
+    print(result_a - result_b)
+
+
+def test_small(jax_rng):
+    stack = [[1]]
+    graph = jraph.GraphsTuple(
+        nodes=jnp.asarray([1, 2, 3]).reshape((3, 1)),
+        edges=jnp.asarray([5, 6]).reshape((2, 1)),
+        senders=jnp.asarray([0, 1], dtype=int),
+        receivers=jnp.asarray([2, 0], dtype=int),
+        n_node=jnp.asarray([3], dtype=int),
+        n_edge=jnp.asarray([2], dtype=int),
+        globals=jnp.asarray([[0.0]]),
+    )
+
+    fully_graph, edge_weights = edge_weight_decoder.make_graph_fully_connected(graph, 1)
+    nonzero = jnp.nonzero(edge_weights)
+
+    model = mpg_edge_weight.MessagePassingEW(
+        node_feature_sizes=stack,
+        edge_feature_sizes=None,
+        global_feature_sizes=None,
+    )
+
+    params = model.init(jax_rng, graph)
+
+    result_a = model.apply(params, graph)
+    result_b = model.apply(params, fully_graph, edge_weights)
+
+    print("a", result_a.nodes)
+    print("b", result_b.nodes)

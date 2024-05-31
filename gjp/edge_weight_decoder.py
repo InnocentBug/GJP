@@ -90,17 +90,16 @@ def make_graph_fully_connected(graph, multi_edge_repeat):
         g = unbatch[i]
         ng = unbatch_new[2 * i]
         edge_weight = np.zeros(max_nodes**2 * multi_edge_repeat)
-        new_edges = np.zeros((max_nodes**2 * multi_edge_repeat,) + g.edges.shape[1:])
+        new_edges = np.zeros((g.n_node[0] ** 2 * multi_edge_repeat,) + g.edges.shape[1:])
 
-        sort_idx = jnp.argsort(g.senders + g.receivers)
-        sorted_senders = g.senders[sort_idx]
-        sorted_receivers = g.receivers[sort_idx]
-        sorted_edges = g.edges[sort_idx]
+        sorted_senders = g.senders
+        sorted_receivers = g.receivers
+        sorted_edges = g.edges
 
         search_map = {}
         for old_idx in range(g.senders.shape[0]):
-            send_idx = int(sorted_receivers[old_idx])
-            recv_idx = int(sorted_senders[old_idx])
+            send_idx = int(sorted_senders[old_idx])
+            recv_idx = int(sorted_receivers[old_idx])
             try:
                 start_search = search_map[(send_idx, recv_idx)]
             except KeyError:
@@ -111,18 +110,38 @@ def make_graph_fully_connected(graph, multi_edge_repeat):
                 if ng.senders[new_idx] == send_idx and ng.receivers[new_idx] == recv_idx:
                     new_match_idx = new_idx
                     break
+
             assert new_match_idx is not None
+            assert new_match_idx < g.n_node[0] ** 2 * multi_edge_repeat
             search_map[(send_idx, recv_idx)] = new_match_idx + 1
 
             new_edges[new_match_idx] = sorted_edges[old_idx]
-            edge_weight[new_match_idx] = 1
+            edge_weight[new_match_idx] += 1
 
         unbatch_new[2 * i] = ng._replace(edges=jnp.asarray(new_edges))
         unbatch_new[2 * i + 1] = unbatch_new[2 * i + 1]._replace(edges=jnp.zeros((unbatch_new[2 * i + 1].n_edge[0],) + g.edges.shape[1:]))
+
         edge_weight_list.append(edge_weight)
 
     new_graph = jraph.batch(unbatch_new)
 
-    new_graph = new_graph._replace(nodes=new_nodes.reshape((new_nodes.shape[0] * new_nodes.shape[1], new_nodes.shape[2])))
+    new_graph = new_graph._replace(nodes=new_nodes.reshape((new_nodes.shape[0] * new_nodes.shape[1], new_nodes.shape[2])), globals=jnp.repeat(graph.globals, 2, axis=0))
 
     return new_graph, jnp.concatenate(edge_weight_list)
+
+
+def make_graph_sparse(graph, edge_weights):
+    max_node = graph.n_node[0] + graph.n_node[1]
+    num_graphs = graph.n_node.shape[0] // 2
+    unbatch = jraph.unbatch(graph)
+    new_graphs = []
+
+    edge_weights = edge_weights.reshape((num_graphs, edge_weights.shape[0] // num_graphs))
+    for i in range(num_graphs):
+        old_graph = unbatch[2 * i]
+        logic = jnp.nonzero(edge_weights[i])[0]
+        new_graph = jraph.GraphsTuple(
+            nodes=old_graph.nodes, edges=old_graph.edges[logic], senders=old_graph.senders[logic], receivers=old_graph.receivers[logic], n_node=old_graph.n_node, n_edge=jnp.asarray([jnp.sum(edge_weights[i], dtype=int)]), globals=old_graph.globals
+        )
+        new_graphs.append(new_graph)
+    return jraph.batch(new_graphs)
