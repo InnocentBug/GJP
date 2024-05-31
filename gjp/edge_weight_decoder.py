@@ -61,9 +61,29 @@ def make_graph_fully_connected(graph, multi_edge_repeat):
     new_graph = graph_generator(input_data)
 
     cumsum_end = jnp.cumsum(graph.n_node, dtype=int)
-    cumsum_start = jnp.concatenate([[0], cumsum_end[:-1]])
+    cumsum_start = jnp.concatenate([jnp.zeros(1), cumsum_end[:-1]])
 
-    idx = jnp.vstack([cumsum_start, cumsum_end])
-    print(idx)
+    idx = jnp.vstack([cumsum_start, cumsum_end]).transpose().astype(int)
+
+    def _scatter_nodes(sub_idx):
+        new_node = jax.lax.dynamic_slice_in_dim(operand=graph.nodes, start_index=sub_idx[0], slice_size=max_nodes)
+
+        slice_size = sub_idx[1] - sub_idx[0]
+        roll_shift = (sub_idx[0] + max_nodes) - graph.nodes.shape[0]
+        roll_shift = roll_shift * (roll_shift > 0).astype(int)
+        roll_shift = max_nodes - roll_shift
+        new_node = jnp.roll(new_node, roll_shift, axis=0)
+
+        logic = jnp.arange(max_nodes) < slice_size
+        new_node = new_node * logic[:, None]
+        return new_node
+
+    scatter_nodes = jax.vmap(_scatter_nodes, in_axes=0)
+    new_nodes = scatter_nodes(idx)
+
+    edge_offset = jnp.concatenate([jnp.zeros(1), jnp.cumsum(new_graph.n_edge[1:][::2])])
+    print(edge_offset)
+
+    new_graph = new_graph._replace(nodes=new_nodes.reshape((new_nodes.shape[0] * new_nodes.shape[1], new_nodes.shape[2])))
 
     return new_graph

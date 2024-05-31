@@ -63,8 +63,19 @@ def test_full_edge_decoder(max_num_nodes, multi_edge_repeat, jax_rng):
 
 def test_make_graph_fully_connected(batch_graphs):
     multi_edge_repeat = bag_gae.find_multi_edge_repeat(batch_graphs)
-    print(multi_edge_repeat)
+    max_nodes = jnp.max(batch_graphs.n_node)
+
+    unbatch = jraph.unbatch(batch_graphs)
+    for i in range(len(unbatch)):
+        new_nodes = jnp.hstack([unbatch[i].nodes + i + 1, unbatch[i].nodes + i + 2])
+        unbatch[i] = unbatch[i]._replace(nodes=new_nodes)
+
+    batch_graphs = jraph.batch(unbatch)
 
     fully_graph = edge_weight_decoder.make_graph_fully_connected(batch_graphs, multi_edge_repeat)
 
-    print(fully_graph)
+    unbatch_fully = jraph.unbatch(fully_graph)
+    for i in range(len(unbatch)):
+        assert jnp.allclose(unbatch[i].nodes, unbatch_fully[2 * i].nodes)
+        assert jnp.sum(jnp.abs(unbatch_fully[2 * i + 1].nodes)) < 1e-12
+    # print(fully_graph)
