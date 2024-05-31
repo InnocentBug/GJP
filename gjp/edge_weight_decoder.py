@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 import jraph
+import numpy as np
 from flax import linen as nn
 
 
@@ -81,9 +82,47 @@ def make_graph_fully_connected(graph, multi_edge_repeat):
     scatter_nodes = jax.vmap(_scatter_nodes, in_axes=0)
     new_nodes = scatter_nodes(idx)
 
-    edge_offset = jnp.concatenate([jnp.zeros(1), jnp.cumsum(new_graph.n_edge[1:][::2])])
-    print(edge_offset)
+    unbatch = jraph.unbatch(graph)
+    unbatch_new = jraph.unbatch(new_graph)
+    edge_weight_list = []
+
+    for i in range(len(unbatch)):
+        g = unbatch[i]
+        ng = unbatch_new[2 * i]
+        edge_weight = np.zeros(max_nodes**2 * multi_edge_repeat)
+        new_edges = np.zeros((max_nodes**2 * multi_edge_repeat,) + g.edges.shape[1:])
+
+        sort_idx = jnp.argsort(g.senders + g.receivers)
+        sorted_senders = g.senders[sort_idx]
+        sorted_receivers = g.receivers[sort_idx]
+        sorted_edges = g.edges[sort_idx]
+
+        search_map = {}
+        for old_idx in range(g.senders.shape[0]):
+            send_idx = int(sorted_receivers[old_idx])
+            recv_idx = int(sorted_senders[old_idx])
+            try:
+                start_search = search_map[(send_idx, recv_idx)]
+            except KeyError:
+                start_search = 0
+
+            new_match_idx = None
+            for new_idx in range(start_search, ng.senders.shape[0]):
+                if ng.senders[new_idx] == send_idx and ng.receivers[new_idx] == recv_idx:
+                    new_match_idx = new_idx
+                    break
+            assert new_match_idx is not None
+            search_map[(send_idx, recv_idx)] = new_match_idx + 1
+
+            new_edges[new_match_idx] = sorted_edges[old_idx]
+            edge_weight[new_match_idx] = 1
+
+        unbatch_new[2 * i] = ng._replace(edges=jnp.asarray(new_edges))
+        unbatch_new[2 * i + 1] = unbatch_new[2 * i + 1]._replace(edges=jnp.zeros((unbatch_new[2 * i + 1].n_edge[0],) + g.edges.shape[1:]))
+        edge_weight_list.append(edge_weight)
+
+    new_graph = jraph.batch(unbatch_new)
 
     new_graph = new_graph._replace(nodes=new_nodes.reshape((new_nodes.shape[0] * new_nodes.shape[1], new_nodes.shape[2])))
 
-    return new_graph
+    return new_graph, jnp.concatenate(edge_weight_list)

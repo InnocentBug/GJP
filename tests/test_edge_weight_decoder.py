@@ -68,14 +68,19 @@ def test_make_graph_fully_connected(batch_graphs):
     unbatch = jraph.unbatch(batch_graphs)
     for i in range(len(unbatch)):
         new_nodes = jnp.hstack([unbatch[i].nodes + i + 1, unbatch[i].nodes + i + 2])
-        unbatch[i] = unbatch[i]._replace(nodes=new_nodes)
+        new_edges = jnp.hstack([unbatch[i].edges + i + 1, unbatch[i].edges + i + 2])
+
+        unbatch[i] = unbatch[i]._replace(nodes=new_nodes, edges=new_edges)
 
     batch_graphs = jraph.batch(unbatch)
 
-    fully_graph = edge_weight_decoder.make_graph_fully_connected(batch_graphs, multi_edge_repeat)
+    fully_graph, edge_weights = edge_weight_decoder.make_graph_fully_connected(batch_graphs, multi_edge_repeat)
+
+    assert jnp.sum(edge_weights) == jnp.sum(batch_graphs.n_edge)
 
     unbatch_fully = jraph.unbatch(fully_graph)
     for i in range(len(unbatch)):
         assert jnp.allclose(unbatch[i].nodes, unbatch_fully[2 * i].nodes)
         assert jnp.sum(jnp.abs(unbatch_fully[2 * i + 1].nodes)) < 1e-12
+        print(unbatch_fully[2 * i].edges)
     # print(fully_graph)
