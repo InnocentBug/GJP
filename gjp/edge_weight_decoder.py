@@ -1,10 +1,14 @@
 from dataclasses import dataclass
+from typing import Any, Sequence
 
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import jraph
 import numpy as np
-from flax import linen as nn
+
+from .model import MLP
+from .mpg_edge_weight import MessagePassingEW
 
 
 @dataclass
@@ -51,6 +55,84 @@ class FullyConnectedGraph:
 
         graph = jraph.GraphsTuple(nodes=None, edges=None, senders=senders.flatten().astype(int), receivers=receivers.flatten().astype(int), n_edge=n_edge.flatten().astype(int), n_node=n_node.flatten().astype(int), globals=None)
         return graph
+
+
+class EdgeWeightDecoder(nn.Module):
+    max_nodes: int
+    init_node_stack: Sequence[int]
+    init_edge_stack: Sequence[int]
+    prob_mpg_stack: Sequence[Sequence[int]]
+    multi_edge_repeat: int = 1
+    mlp_kwargs: dict[str, Any] | None = None
+
+    def setup(self):
+        self._mlp_kwargs = self.mlp_kwargs
+        if self._mlp_kwargs is None:
+            self._mlp_kwargs = {}
+
+        self.graph_generator = FullyConnectedGraph(max_nodes=self.max_nodes, multi_edge_repeat=self.multi_edge_repeat)
+        self.max_edges = self.graph_generator.max_edges
+
+        self._node_mlp = MLP(self.init_node_stack[:-1] + (int(self.max_nodes) * self.init_node_stack[-1],), **self._mlp_kwargs)
+
+        def _node_generator(sub_x):
+            n_node = sub_x[-2]
+            nodes = self._node_mlp(sub_x)
+            nodes = nodes.reshape((int(self.max_nodes), self.init_node_stack[-1]))
+
+            # Mask out invalid nodes
+            logic = jnp.arange(self.max_nodes, dtype=int) < n_node
+            nodes = logic[:, None] * nodes
+
+            return nodes
+
+        self.node_generator = jax.vmap(_node_generator)
+
+        self._edge_mlp = MLP(self.init_edge_stack[:-1] + (int(self.max_edges) * self.init_edge_stack[-1],), **self._mlp_kwargs)
+
+        def _edge_generator(sub_x):
+            n_node = sub_x[-2]
+            edges = self._edge_mlp(sub_x)
+            edges = edges.reshape((self.max_edges, self.init_edge_stack[-1]))
+
+            logic = jnp.arange(self.max_edges, dtype=int) < n_node**2 * self.multi_edge_repeat
+
+            edges = logic[:, None] * edges
+            return edges
+
+        self.edge_generator = jax.vmap(_edge_generator)
+
+        def _smooth_prob(edge_weight, sub_x):
+            n_node = sub_x[-2]
+
+            edge_weight = nn.sigmoid(edge_weight)
+
+            # Mask out invalid edges of the buffer graph
+            logic = jnp.arange(self.max_edges, dtype=int) < n_node**2 * self.multi_edge_repeat
+            edge_weight = logic * edge_weight
+
+            return edge_weight
+
+        self.smooth_prob = jax.vmap(_smooth_prob)
+
+        self.prob_mpg = MessagePassingEW(node_feature_sizes=self.prob_mpg_stack + ((self.init_node_stack[-1],),), edge_feature_sizes=self.prob_mpg_stack + ((1,),), global_feature_sizes=None, mean_instead_of_sum=True, mlp_kwargs=self._mlp_kwargs)
+
+    def __call__(self, x):
+        nodes = self.node_generator(x)
+        edges = self.edge_generator(x)
+        graph = self.graph_generator(x)
+
+        new_globals = jnp.hstack([x, x * 0]).reshape(2 * x.shape[0], x.shape[1])
+
+        graph = graph._replace(nodes=nodes.reshape((nodes.shape[0] * nodes.shape[1], nodes.shape[2])), edges=edges.reshape((edges.shape[0] * edges.shape[1], edges.shape[2])), globals=new_globals)
+        prob_graph = self.prob_mpg(graph)
+
+        graph = graph._replace(nodes=prob_graph.nodes + nodes.reshape((nodes.shape[0] * nodes.shape[1], nodes.shape[2])))
+
+        probabilities = prob_graph.edges.reshape((x.shape[0], self.max_edges))
+        edge_weights = self.smooth_prob(probabilities, x)
+
+        return graph, edge_weights
 
 
 def make_graph_fully_connected(graph, multi_edge_repeat):
@@ -111,8 +193,8 @@ def make_graph_fully_connected(graph, multi_edge_repeat):
                     new_match_idx = new_idx
                     break
 
-            assert new_match_idx is not None
-            assert new_match_idx < g.n_node[0] ** 2 * multi_edge_repeat
+            # assert new_match_idx is not None
+            # assert new_match_idx < g.n_node[0] ** 2 * multi_edge_repeat
             search_map[(send_idx, recv_idx)] = new_match_idx + 1
 
             new_edges[new_match_idx] = sorted_edges[old_idx]
@@ -131,7 +213,8 @@ def make_graph_fully_connected(graph, multi_edge_repeat):
 
 
 def make_graph_sparse(graph, edge_weights):
-    max_node = graph.n_node[0] + graph.n_node[1]
+    edge_weights = jnp.rint(edge_weights.flatten())
+    graph.n_node[0] + graph.n_node[1]
     num_graphs = graph.n_node.shape[0] // 2
     unbatch = jraph.unbatch(graph)
     new_graphs = []

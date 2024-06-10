@@ -1,6 +1,7 @@
 import os
 import tempfile
 
+import flax.linen as nn
 import jax
 import pytest
 
@@ -48,3 +49,9 @@ def batch_graphs(similar_graphs):
 @pytest.fixture(scope="session")
 def jax_rng():
     return jax.random.key(42)
+
+
+@pytest.fixture
+def mlp_kwargs():
+    mlp_kwargs = {"dropout_rate": 0.1, "deterministic": False, "activation": nn.sigmoid}
+    return mlp_kwargs

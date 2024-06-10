@@ -94,6 +94,7 @@ class MessagePassingLayerEW(nn.Module):
 
         concat_args = jnp.hstack([send_node_feature, recv_node_feature, edge_features, edge_repeat_global])
         if edge_weights is not None:
+            edge_weights = edge_weights.flatten()
             edge_features = edge_weights[:, None] * edge_features
             concat_args = edge_weights[:, None] * concat_args
 
