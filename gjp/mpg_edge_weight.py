@@ -84,31 +84,22 @@ class MessagePassingLayerEW(nn.Module):
 
     def __call__(self, graph, edge_weights=None):
         num_nodes = tree.tree_leaves(graph.nodes)[0].shape[0]
-        if edge_weights is not None:
-            edge_weights = edge_weights.reshape((edge_weights.shape[0], 1))
-            send_node_feature = edge_weights[graph.senders] * graph.nodes[graph.senders]
-            recv_node_feature = edge_weights[graph.receivers] * graph.nodes[graph.receivers]
-            print(graph.nodes, graph.receivers, edge_weights[graph.receivers])
-            edge_features = edge_weights * graph.edges
-        else:
-            send_node_feature = graph.nodes[graph.senders]
-            recv_node_feature = graph.nodes[graph.receivers]
-            edge_features = graph.edges
+        send_node_feature = graph.nodes[graph.senders]
+        recv_node_feature = graph.nodes[graph.receivers]
+        edge_features = graph.edges
 
         global_features = graph.globals
-
-        print("w", edge_weights)
-        print("recv", recv_node_feature)
 
         edge_repeat_global = jnp.repeat(global_features, graph.n_edge, axis=0, total_repeat_length=graph.receivers.shape[0])
 
         concat_args = jnp.hstack([send_node_feature, recv_node_feature, edge_features, edge_repeat_global])
-        print("concat", concat_args)
+        if edge_weights is not None:
+            edge_features = edge_weights[:, None] * edge_features
+            concat_args = edge_weights[:, None] * concat_args
 
         # Nodes
         if self.node_feature_sizes is not None:
             new_tmp_nodes = self.node_mlp(concat_args)
-
             if self.mean_instead_of_sum:
                 recv_nodes = jraph.segment_mean(new_tmp_nodes, graph.receivers, num_segments=num_nodes)
             else:
@@ -129,16 +120,10 @@ class MessagePassingLayerEW(nn.Module):
             # Split and sum node features by graph
             if self.mean_instead_of_sum:
                 summed_node_features = split_and_mean(graph.nodes, graph.n_node)
-                if edge_weights is not None:
-                    summed_edge_features = split_and_mean(edge_weights * graph.edges, graph.n_edge)
-                else:
-                    summed_edge_features = split_and_mean(graph.edges, graph.n_edge)
+                summed_edge_features = split_and_mean(edge_features, graph.n_edge)
             else:
                 summed_node_features = split_and_sum(graph.nodes, graph.n_node)
-                if edge_weights is not None:
-                    summed_edge_features = split_and_sum(edge_weights * graph.edges, graph.n_edge)
-                else:
-                    summed_edge_features = split_and_sum(graph.edges, graph.n_edge)
+                summed_edge_features = split_and_sum(edge_features, graph.n_edge)
 
             tmp_node_global = self.global_node_mlp(summed_node_features)
             tmp_edge_global = self.global_edge_mlp(summed_edge_features)

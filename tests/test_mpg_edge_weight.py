@@ -123,7 +123,7 @@ def test_ew_message_passing_layer(batch_graphs, node_stack, edge_stack, global_s
 
 
 @pytest.mark.parametrize("mpg_stack", [[None, [1, 2], [3, 4]], None, [[2], [3], [4]]])
-def test_edge_weigth_metric(jax_rng, batch_graphs, mpg_stack):
+def test_edge_weight_metric(jax_rng, batch_graphs, mpg_stack):
     multi_edge_repeat = bag_gae.find_multi_edge_repeat(batch_graphs)
     fully_graph, edge_weights = edge_weight_decoder.make_graph_fully_connected(batch_graphs, multi_edge_repeat)
 
@@ -131,15 +131,17 @@ def test_edge_weigth_metric(jax_rng, batch_graphs, mpg_stack):
 
     params = model.init(jax_rng, batch_graphs)
 
-    result_a = model.apply(params, batch_graphs).globals
-    result_b = model.apply(params, fully_graph, edge_weights).globals[::2]
+    graph_a = model.apply(params, batch_graphs)
+    graph_b = model.apply(params, fully_graph, edge_weights)
 
+    result_a = graph_a.globals
+    result_b = graph_b.globals[::2]
     assert result_a.shape == result_b.shape
-    print(result_a - result_b)
+    assert jnp.allclose(result_a, result_b)
 
 
 def test_small(jax_rng):
-    stack = [[1]]
+    stack = [[16, 2], [6, 1]]
     graph = jraph.GraphsTuple(
         nodes=jnp.asarray([1, 2, 3]).reshape((3, 1)),
         edges=jnp.asarray([5, 6]).reshape((2, 1)),
@@ -151,12 +153,11 @@ def test_small(jax_rng):
     )
 
     fully_graph, edge_weights = edge_weight_decoder.make_graph_fully_connected(graph, 1)
-    nonzero = jnp.nonzero(edge_weights)
 
     model = mpg_edge_weight.MessagePassingEW(
         node_feature_sizes=stack,
-        edge_feature_sizes=None,
-        global_feature_sizes=None,
+        edge_feature_sizes=stack,
+        global_feature_sizes=stack,
     )
 
     params = model.init(jax_rng, graph)
@@ -164,5 +165,12 @@ def test_small(jax_rng):
     result_a = model.apply(params, graph)
     result_b = model.apply(params, fully_graph, edge_weights)
 
-    print("a", result_a.nodes)
-    print("b", result_b.nodes)
+    revert_graph = edge_weight_decoder.make_graph_sparse(result_b, edge_weights)
+
+    assert jnp.allclose(result_a.nodes, revert_graph.nodes)
+    assert jnp.abs(jnp.sum(result_a.edges) - jnp.sum(revert_graph.edges)) < 1e-7
+    assert jnp.allclose(result_a.n_node, revert_graph.n_node)
+    assert jnp.abs(jnp.sum(result_a.senders) - jnp.sum(revert_graph.senders)) < 1e-10
+    assert jnp.abs(jnp.sum(result_a.receivers) - jnp.sum(revert_graph.receivers)) < 1e-10
+
+    assert jnp.allclose(result_a.globals[0], result_b.globals[0])
