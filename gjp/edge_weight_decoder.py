@@ -216,8 +216,9 @@ def make_graph_fully_connected(graph, multi_edge_repeat):
     return new_graph, jnp.concatenate(edge_weight_list)
 
 
-def make_graph_sparse(graph, edge_weights):
-    edge_weights = jnp.rint(edge_weights.flatten())
+def make_graph_sparse(graph, edge_weights, threshold=0.5):
+    edge_weights = edge_weights.flatten() >= threshold
+    edge_weights = edge_weights.astype(int)
     graph.n_node[0] + graph.n_node[1]
     num_graphs = graph.n_node.shape[0] // 2
     unbatch = jraph.unbatch(graph)

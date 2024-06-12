@@ -184,7 +184,15 @@ class MessagePassingEW(nn.Module):
 
 
 def edge_weights_sharpness_loss(edge_weights):
-    return jnp.mean(jnp.minimum(jnp.abs(edge_weights), jnp.abs(edge_weights - 1.0)))
+    data = jnp.minimum(jnp.abs(edge_weights), jnp.abs(edge_weights - 1.0))
+    data = jnp.exp(data) - 1
+
+    # Just better then mean.
+    # Not meant to be differentiable
+    n_elements = 1 + jnp.sum(data > 1e-5)
+    loss = jnp.sum(data) / n_elements
+
+    return loss
 
 
 def edge_weights_n_edge_loss(edge_weights, n_edge):
