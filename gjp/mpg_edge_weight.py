@@ -185,7 +185,7 @@ class MessagePassingEW(nn.Module):
 
 def edge_weights_sharpness_loss(edge_weights):
     data = jnp.cos(edge_weights * 2 * jnp.pi + jnp.pi) + 1
-    data = jnp.exp(data / 10) - 1
+    data = -jnp.log(1 - data)
 
     # Just better then mean.
     # Not meant to be differentiable
