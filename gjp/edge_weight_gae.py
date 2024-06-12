@@ -84,7 +84,7 @@ def pre_loss_function(params, train_state, in_graphs, rngs, metric_state):
 
 def loss_function(params, train_state, in_graphs, rngs, metric_state):
     recon_loss, kl_divergence, sharp_loss, n_edge_loss = pre_loss_function(params, train_state, in_graphs, rngs, metric_state)
-    return jnp.sqrt(recon_loss) + kl_divergence + sharp_loss + n_edge_loss
+    return jnp.sqrt(recon_loss) + kl_divergence + (jnp.exp(sharp_loss) - 1) + n_edge_loss
 
 
 def train_step(batch_train, batch_test, train_state, rng, metric_state):
