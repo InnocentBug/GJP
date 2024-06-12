@@ -74,16 +74,17 @@ def pre_loss_function(params, train_state, in_graphs, rngs, metric_state):
     out_metric = out_metric[:-1]
 
     recon_loss = jnp.sqrt(jnp.mean((in_metric - out_metric) ** 2))
-    kl_divergence = -0.5 * jnp.sum(1 + log_sigma - jnp.square(mu) - jnp.exp(log_sigma))
-    sharp_loss = edge_weights_sharpness_loss(edge_weights)
-    n_edge_loss = edge_weights_n_edge_loss(edge_weights, out_graphs.n_edge[::2])
+    kl_divergence = -0.5 * jnp.sum(1 + log_sigma[:-1] - jnp.square(mu[:-1]) - jnp.exp(log_sigma[:-1]))
+    sharp_loss = edge_weights_sharpness_loss(edge_weights[:-1])
+    n_edge_compare = in_graphs.n_edge
+    n_edge_loss = edge_weights_n_edge_loss(edge_weights[:-1], n_edge_compare[:-1])
 
     return recon_loss, kl_divergence, sharp_loss, n_edge_loss
 
 
 def loss_function(params, train_state, in_graphs, rngs, metric_state):
     recon_loss, kl_divergence, sharp_loss, n_edge_loss = pre_loss_function(params, train_state, in_graphs, rngs, metric_state)
-    return recon_loss + kl_divergence + sharp_loss + n_edge_loss
+    return jnp.sqrt(recon_loss) + kl_divergence + sharp_loss / 1e2 + n_edge_loss
 
 
 def train_step(batch_train, batch_test, train_state, rng, metric_state):

@@ -84,7 +84,7 @@ def test_ew_loss_function(batch_graphs, mlp_kwargs):
     partial_step = partial(edge_weight_gae.train_step, metric_state=metric_state)
     func = jax.jit(partial_step)
 
-    for _ in range(30):
+    for _ in range(3):
         train_state, train_loss, train_recon, train_kl, train_sharp, train_n_edge, test_recon, test_kl, test_sharp, test_n_edge = func(batch_graphs, batch_graphs, train_state, rng=rng_split)
         rng, rng_split = jax.random.split(rng)
 

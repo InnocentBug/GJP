@@ -1,12 +1,11 @@
 import hashlib
-import os
 
 import jax
 import jax.numpy as jnp
 import jraph
 import pytest
 
-from gjp import bag_gae, edge_weight_decoder, metric_util, mpg_edge_weight
+from gjp import bag_gae, edge_weight_decoder, mpg_edge_weight
 
 
 @pytest.mark.parametrize("max_num_nodes, multi_edge_repeat", [(5, 1), (6, 2), (10, 3)])
@@ -166,7 +165,7 @@ def test_edge_weight_decoder(max_num_nodes, multi_edge_repeat, stack, mpg_stack,
     m.update(test_input.tobytes())
 
     original_path, _ = ensure_tempfile
-    metric_util.svg_graph_list(unbatch_nodes, filename=os.path.join(original_path, f"final_ew_decode{m.hexdigest(3)}.pdf"))
+    # metric_util.svg_graph_list(unbatch_nodes, filename=os.path.join(original_path, f"final_ew_decode{m.hexdigest(3)}.pdf"))
 
     for _i, graph in enumerate(unbatch_nodes):
         vals, count = jnp.unique(graph.senders, return_counts=True)

@@ -35,6 +35,25 @@ def _loss_helper(x):
     return jnp.exp(-x * 2) * 100
 
 
+def state_loss_combined(params, state, graph, norm, rngs=None):
+    out_graph = state.apply_fn(params, graph, rngs=rngs)
+
+    metric_embeds = out_graph.globals[:-1]
+
+    dist_matrix = jnp.sum((metric_embeds[:, None] - metric_embeds[None, :]) ** 2, axis=-1)
+    clean_matrix = jnp.fill_diagonal(dist_matrix, jnp.nan, inplace=False)
+
+    n = metric_embeds.shape[0]
+    matrix_before_sum = _loss_helper(clean_matrix)
+    mean = jnp.nansum(matrix_before_sum) / (n * (n - 1))
+
+    if norm:
+        extra_loss = (1 + jnp.exp(-state.step / 1e-5)) * jnp.mean(metric_embeds**2)
+        mean = 10 * mean + extra_loss
+
+    return mean
+
+
 def loss_function_where(params, graph, model, threshold, rngs=None):
     out_graph = model.apply(params, graph, rngs=rngs)
     metric_embeds = out_graph.globals[:-1]

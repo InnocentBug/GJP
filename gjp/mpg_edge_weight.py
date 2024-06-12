@@ -190,5 +190,5 @@ def edge_weights_sharpness_loss(edge_weights):
 def edge_weights_n_edge_loss(edge_weights, n_edge):
     a = jnp.sum(edge_weights, axis=1)
     b = a - n_edge
-    loss = jnp.mean(b**2)
+    loss = jnp.mean(b**2) + jnp.mean(jnp.abs(b)) + jnp.max(jnp.abs(b))
     return loss

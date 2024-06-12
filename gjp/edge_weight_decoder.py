@@ -115,7 +115,11 @@ class EdgeWeightDecoder(nn.Module):
 
         self.smooth_prob = jax.vmap(_smooth_prob)
 
-        self.prob_mpg = MessagePassingEW(node_feature_sizes=self.prob_mpg_stack + ((self.init_node_stack[-1],),), edge_feature_sizes=self.prob_mpg_stack + ((1,),), global_feature_sizes=None, mean_instead_of_sum=True, mlp_kwargs=self._mlp_kwargs)
+        self.prob_mpg = MessagePassingEW(node_feature_sizes=None, edge_feature_sizes=self.prob_mpg_stack + ((1,),), global_feature_sizes=None, mean_instead_of_sum=True, mlp_kwargs=self._mlp_kwargs)
+
+        self.final_mpg = MessagePassingEW(
+            node_feature_sizes=self.prob_mpg_stack + ((self.init_node_stack[-1],),), edge_feature_sizes=self.prob_mpg_stack + ((self.init_edge_stack[-1],),), global_feature_sizes=None, mean_instead_of_sum=True, mlp_kwargs=self._mlp_kwargs
+        )
 
     def __call__(self, x):
         nodes = self.node_generator(x)
@@ -127,12 +131,12 @@ class EdgeWeightDecoder(nn.Module):
         graph = graph._replace(nodes=nodes.reshape((nodes.shape[0] * nodes.shape[1], nodes.shape[2])), edges=edges.reshape((edges.shape[0] * edges.shape[1], edges.shape[2])), globals=new_globals)
         prob_graph = self.prob_mpg(graph)
 
-        graph = graph._replace(nodes=prob_graph.nodes + nodes.reshape((nodes.shape[0] * nodes.shape[1], nodes.shape[2])))
-
         probabilities = prob_graph.edges.reshape((x.shape[0], self.max_edges))
         edge_weights = self.smooth_prob(probabilities, x)
 
-        return graph, edge_weights
+        final_graph = self.final_mpg(graph, edge_weights)
+
+        return final_graph, edge_weights
 
 
 def make_graph_fully_connected(graph, multi_edge_repeat):
