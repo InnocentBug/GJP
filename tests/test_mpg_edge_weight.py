@@ -23,7 +23,7 @@ def test_amplify_values(seed, size):
     key = jax.random.key(42)
     values = jax.random.uniform(key, (size,))
 
-    for i in range(3, size - 3):
+    for i in range(size - 3):
         result = jit_junc(values, i)
         assert jnp.abs(i - jnp.sum(result)) < 1.5
 
@@ -50,7 +50,7 @@ def test_train_edge_weights(jax_rng, final_size):
 
         @nn.compact
         def __call__(self, x):
-            mlp_a = MLP([8, 32, 64, 32, 8])
+            mlp_a = MLP([32, 64, 32, 32])
             mlp_b = MLP([self.final_size], activation=nn.sigmoid)
 
             def func(x):
@@ -66,34 +66,37 @@ def test_train_edge_weights(jax_rng, final_size):
     test_input = jax.random.normal(jax_rng, (num_array, 2))
 
     n_edge = jax.random.randint(jax_rng, (num_array, 1), 0, final_size + 1, dtype=int)
-    test_input = jnp.hstack([test_input, n_edge])
+    # test_input = jnp.hstack([test_input, n_edge])
 
     model = Model(final_size)
     params = model.init(jax_rng, test_input)
     val_a = model.apply(params, test_input)
+    print(val_a)
     assert mpg_edge_weight.edge_weights_sharpness_loss(val_a) > 0.1
     assert mpg_edge_weight.edge_weights_n_edge_loss(val_a, n_edge) > 0.1
 
-    tx = optax.adamw(learning_rate=2e-4)
+    tx = optax.adamw(learning_rate=1e-3)
     opt_state = tx.init(params)
     state = TrainState(params=params, apply_fn=model.apply, tx=tx, opt_state=opt_state, step=0)
 
+    # TO FIX
     jit_step = jax.jit(train_step)
     jit_step = train_step
+
     last_loss = None
     for i in range(1000):
         state, val = jit_step(test_input, n_edge, state)
-        if i % 1000 == 0:
+        if i % 10 == 0:
+            print(val)
             if last_loss is not None:
-                print(val)
-                # assert val <= 1000 * last_loss
+                assert val <= 1000 * last_loss
             if last_loss is None or val < last_loss:
                 last_loss = val
 
     val_b = model.apply(state.params, test_input)
     print(val_b)
     print(n_edge)
-    lossA = mpg_edge_weight.edge_weights_sharpness_loss(val_b, print_=True)
+    lossA = mpg_edge_weight.edge_weights_sharpness_loss(val_b)
     lossB = mpg_edge_weight.edge_weights_n_edge_loss(val_b, n_edge)
     print(lossA, lossB)
 

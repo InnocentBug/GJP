@@ -186,7 +186,7 @@ class MessagePassingEW(nn.Module):
 def amplify_values_threshold(values, threshold):
 
     values -= threshold
-    values /= jnp.var(values) + 1e-4
+    values /= jnp.var(values) + 1
     values = nn.sigmoid(values)
 
     return values
@@ -226,7 +226,7 @@ def edge_weights_sharpness_loss(edge_weights, factor=2):
 
     loss *= jnp.max(data)
 
-    return jnp.sqrt(loss) + jnp.mean(jnp.var(edge_weights, axis=0))
+    return jnp.sqrt(loss)
 
 
 def edge_weights_n_edge_loss(edge_weights, n_edge):
