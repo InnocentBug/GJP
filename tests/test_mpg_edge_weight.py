@@ -1,3 +1,5 @@
+from functools import partial
+
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -10,13 +12,30 @@ from utils import compare_graphs
 from gjp import MLP, bag_gae, edge_weight_decoder, mpg_edge_weight
 
 
+@pytest.mark.parametrize("seed, size", [(12, 10), (14, 100), (11, 50)])
+def test_amplify_values(seed, size):
+    num_thresholds = 25
+    iterations = 2
+
+    func = partial(mpg_edge_weight.amplify_values, iterations=iterations, num_thresholds=num_thresholds)
+    jit_junc = jax.jit(func)
+
+    key = jax.random.key(42)
+    values = jax.random.uniform(key, (size,))
+
+    for i in range(3, size - 3):
+        result = jit_junc(values, i)
+        assert jnp.abs(i - jnp.sum(result)) < 1.5
+
+
 @pytest.mark.parametrize("final_size", [1, 10, 100])
 def test_train_edge_weights(jax_rng, final_size):
 
     def train_step(data, n_edge, state):
         def loss_function(params, data):
             edge_weights = state.apply_fn(params, data)
-            edge_weights = edge_weights
+            justifier = jax.vmap(partial(mpg_edge_weight.amplify_values, iterations=2, num_thresholds=25), in_axes=0)
+            edge_weights = justifier(edge_weights, n_edge)
             loss = mpg_edge_weight.edge_weights_sharpness_loss(edge_weights)
             loss += mpg_edge_weight.edge_weights_n_edge_loss(edge_weights, n_edge)
             return loss
@@ -64,6 +83,7 @@ def test_train_edge_weights(jax_rng, final_size):
     state = TrainState(params=params, apply_fn=model.apply, tx=tx, opt_state=opt_state, step=0)
 
     jit_step = jax.jit(train_step)
+    jit_step = train_step
     last_loss = None
     for i in range(500000):
         state, val = jit_step(test_input, n_edge, state)

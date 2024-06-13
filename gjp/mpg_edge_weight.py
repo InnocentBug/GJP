@@ -183,9 +183,41 @@ class MessagePassingEW(nn.Module):
         return tmp_graphs
 
 
+def amplify_values_threshold(values, threshold):
+
+    values -= threshold
+    values /= jnp.var(values) + 1e-4
+    values = nn.sigmoid(values)
+
+    return values
+
+
+def amplify_values_inner(values, N, num_thresholds):
+    thresholds = jnp.linspace(0, 1, num_thresholds)
+
+    def inner(t):
+        ampl = amplify_values_threshold(values, t)
+        result = jnp.abs(jnp.sum(ampl, axis=0) - N)
+        return result
+
+    func = jax.vmap(inner, in_axes=0)
+    result = func(thresholds)
+
+    idx = jnp.argmin(result)
+
+    return amplify_values_threshold(values, thresholds[idx])
+
+
+def amplify_values(values, N, iterations, num_thresholds):
+    result = values
+    for _i in range(iterations):
+        result = amplify_values_inner(result, N, num_thresholds)
+    return result
+
+
 def edge_weights_sharpness_loss(edge_weights, factor=2):
     data = -(edge_weights**2) + edge_weights
-    data = factor * jnp.sqrt(data)
+    data = factor * jnp.sqrt(data + 1e-4)
 
     # Just better then mean.
     # Not meant to be differentiable
