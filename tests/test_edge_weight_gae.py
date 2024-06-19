@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 import jraph
 import optax
+import pytest
 from flax.training.train_state import TrainState
 
 from gjp import bag_gae, edge_weight_decoder, edge_weight_gae, mpg_edge_weight
@@ -11,6 +12,9 @@ from gjp import bag_gae, edge_weight_decoder, edge_weight_gae, mpg_edge_weight
 
 def test_edge_weight_gae(batch_graphs, mlp_kwargs):
     max_num_nodes = jnp.max(batch_graphs.n_node) + 1
+    max_edge_iter = jnp.max(batch_graphs.n_edge) + 10
+    gumbel_temperature = 0.5
+
     multi_edge_repeat = bag_gae.find_multi_edge_repeat(batch_graphs)
 
     mlp_stack = [1, 4, 32, 16, 4, 2]
@@ -18,6 +22,7 @@ def test_edge_weight_gae(batch_graphs, mlp_kwargs):
 
     model = edge_weight_gae.EdgeWeightGAE(
         max_num_nodes=max_num_nodes,
+        max_edge_iter=max_edge_iter,
         encoder_stack=mpg_stack,
         node_stack=mlp_stack,
         edge_stack=mlp_stack,
@@ -26,14 +31,13 @@ def test_edge_weight_gae(batch_graphs, mlp_kwargs):
         mlp_kwargs=mlp_kwargs,
     )
     rng = jax.random.key(234)
-    rng, rng_split_a, rng_split_b = jax.random.split(rng, 3)
+    rng, rng_split_a, rng_split_b, rng_split_c = jax.random.split(rng, 4)
 
-    params = model.init({"params": rng, "reparametrize": rng_split_a, "dropout": rng_split_b}, batch_graphs)
-    rng, rng_split_a, rng_split_b = jax.random.split(rng, 3)
+    params = model.init({"params": rng, "reparametrize": rng_split_a, "dropout": rng_split_b, "gumbel": rng_split_c}, batch_graphs, gumbel_temperature)
+    rng, rng_split_a, rng_split_b, rng_split_c = jax.random.split(rng, 4)
 
-    apply_model = jax.jit(lambda x, y, z, w: model.apply(x, y, rngs={"reparametrize": z, "dropout": w}))
-    out_graphs, edge_weights, mu, sigma = apply_model(params, batch_graphs, rng_split_a, rng_split_b)
-    rng, rng_split = jax.random.split(rng)
+    apply_model = jax.jit(lambda x, y, z, w, v: model.apply(x, y, gumbel_temperature, rngs={"reparametrize": z, "dropout": w, "gumbel": v}))
+    out_graphs, edge_weights, mu, sigma = apply_model(params, batch_graphs, rng_split_a, rng_split_b, rng_split_c)
 
     out_graphs = edge_weight_decoder.make_graph_sparse(out_graphs, edge_weights)
 
@@ -44,8 +48,10 @@ def test_edge_weight_gae(batch_graphs, mlp_kwargs):
         assert out_graph.n_node == in_graph.n_node
 
 
-def test_ew_loss_function(batch_graphs, mlp_kwargs):
+@pytest.mark.parametrize("gumbel_temperature", [1, 0.5, 0.1, 0.05])
+def test_ew_loss_function(batch_graphs, mlp_kwargs, gumbel_temperature):
     max_num_nodes = jnp.max(batch_graphs.n_node) + 1
+    max_edge_iter = jnp.max(batch_graphs.n_edge) + 10
     multi_edge_repeat = bag_gae.find_multi_edge_repeat(batch_graphs)
 
     mlp_stack = [1, 4, 32, 16, 4, batch_graphs.nodes.shape[1]]
@@ -53,6 +59,7 @@ def test_ew_loss_function(batch_graphs, mlp_kwargs):
 
     model = edge_weight_gae.EdgeWeightGAE(
         max_num_nodes=max_num_nodes,
+        max_edge_iter=max_edge_iter,
         encoder_stack=mpg_stack,
         node_stack=mlp_stack,
         edge_stack=mlp_stack,
@@ -62,14 +69,14 @@ def test_ew_loss_function(batch_graphs, mlp_kwargs):
     )
 
     rng = jax.random.key(72)
-    rng, rng_split_a, rng_split_b = jax.random.split(rng, 3)
+    rng, rng_split_a, rng_split_b, rng_split_c = jax.random.split(rng, 4)
 
-    params = model.init({"params": rng, "reparametrize": rng_split_a, "dropout": rng_split_b}, batch_graphs)
-    rng, rng_split_a, rng_split_b = jax.random.split(rng, 3)
+    params = model.init({"params": rng, "reparametrize": rng_split_a, "dropout": rng_split_b, "gumbel": rng_split_c}, batch_graphs, gumbel_temperature)
+    rng, rng_split_a, rng_split_b, rng_split_c = jax.random.split(rng, 4)
     tx = optax.adam(learning_rate=1e-3)
     opt_state = tx.init(params)
     train_state = TrainState(step=0, apply_fn=model.apply, params=params, tx=tx, opt_state=opt_state)
-    train_state.apply_fn(train_state.params, batch_graphs, rngs={"reparametrize": rng_split_a, "dropout": rng_split_b})
+    # train_state.apply_fn(train_state.params, batch_graphs, gumbel_temperature, rngs={"reparametrize": rng_split_a, "dropout": rng_split_b, "gumbel": rng_split_c})
 
     metric_model = mpg_edge_weight.MessagePassingEW(
         node_feature_sizes=mpg_stack,
@@ -85,7 +92,7 @@ def test_ew_loss_function(batch_graphs, mlp_kwargs):
     func = jax.jit(partial_step)
 
     for _ in range(3):
-        train_state, train_loss, train_recon, train_kl, train_sharp, train_n_edge, test_recon, test_kl, test_sharp, test_n_edge = func(batch_graphs, batch_graphs, train_state, rng=rng_split)
+        train_state, train_loss, train_recon, train_kl, test_recon, test_kl = func(batch_graphs, batch_graphs, train_state, rng=rng_split, gumbel_temperature=gumbel_temperature)
         rng, rng_split = jax.random.split(rng)
 
-        print(train_loss, train_recon, train_kl, train_sharp, train_n_edge, test_recon, test_kl, test_sharp, test_n_edge)
+        print(train_loss, train_recon, train_kl, test_recon, test_kl)

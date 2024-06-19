@@ -6,11 +6,7 @@ import jax.numpy as jnp
 from flax import linen as nn
 
 from .edge_weight_decoder import EdgeWeightDecoder
-from .mpg_edge_weight import (
-    MessagePassingEW,
-    edge_weights_n_edge_loss,
-    edge_weights_sharpness_loss,
-)
+from .mpg_edge_weight import MessagePassingEW
 
 
 class EdgeWeightGAE(nn.Module):
@@ -63,10 +59,10 @@ class EdgeWeightGAE(nn.Module):
         return reconstructed, edge_weights
 
 
-def pre_loss_function(params, train_state, in_graphs, rngs, metric_state):
+def pre_loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature):
     in_metric = metric_state.apply_fn(metric_state.params, in_graphs).globals[:-1]
 
-    tmp_out_graphs, edge_weights, mu, log_sigma = train_state.apply_fn(params, in_graphs, rngs=rngs)
+    tmp_out_graphs, edge_weights, mu, log_sigma = train_state.apply_fn(params, in_graphs, gumbel_temperature, rngs=rngs)
     embedded_space = tmp_out_graphs.globals[::2]
     embedded_space = embedded_space[:, :-2]
 
@@ -82,15 +78,15 @@ def pre_loss_function(params, train_state, in_graphs, rngs, metric_state):
     return recon_loss, kl_divergence
 
 
-def loss_function(params, train_state, in_graphs, rngs, metric_state):
-    recon_loss, kl_divergence = pre_loss_function(params, train_state, in_graphs, rngs, metric_state)
+def loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature):
+    recon_loss, kl_divergence = pre_loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature)
 
     return recon_loss + kl_divergence
 
 
-def train_step(batch_train, batch_test, train_state, rng, metric_state):
-    loss_fn = partial(loss_function, metric_state=metric_state)
-    pre_loss_fn = partial(pre_loss_function, metric_state=metric_state)
+def train_step(batch_train, batch_test, train_state, rng, metric_state, gumbel_temperature):
+    loss_fn = partial(loss_function, metric_state=metric_state, gumbel_temperature=gumbel_temperature)
+    pre_loss_fn = partial(pre_loss_function, metric_state=metric_state, gumbel_temperature=gumbel_temperature)
 
     loss_grad_fn = jax.value_and_grad(loss_fn)
 

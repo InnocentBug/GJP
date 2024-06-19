@@ -1,12 +1,11 @@
 import hashlib
-import os
 
 import jax
 import jax.numpy as jnp
 import jraph
 import pytest
 
-from gjp import bag_gae, edge_weight_decoder, metric_util, mpg_edge_weight
+from gjp import bag_gae, edge_weight_decoder, mpg_edge_weight
 
 
 @pytest.mark.parametrize("max_num_nodes, multi_edge_repeat", [(5, 1), (6, 2), (10, 3)])

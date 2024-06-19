@@ -1,5 +1,4 @@
 import random
-from functools import partial
 
 import flax.linen as nn
 import jax
@@ -57,7 +56,7 @@ def test_gumbel_topk_grad(seed, temperature):
 
     jit_loss = jax.jit(jax.value_and_grad(loss_function))
 
-    for i in range(5):
+    for _i in range(5):
         rng, use_rng = jax.random.split(rng)
         val, grad = jit_loss(x, y, use_rng)
         print(grad)
