@@ -15,6 +15,7 @@ from .mpg_edge_weight import (
 
 class EdgeWeightGAE(nn.Module):
     max_num_nodes: int
+    max_edge_iter: int
     encoder_stack: Sequence[Sequence[int]]
     node_stack: Sequence[int]
     edge_stack: Sequence[int]
@@ -31,9 +32,11 @@ class EdgeWeightGAE(nn.Module):
 
         self.sigma_encoder = MessagePassingEW(node_feature_sizes=self.encoder_stack, edge_feature_sizes=self.encoder_stack, global_feature_sizes=self.encoder_stack, mean_instead_of_sum=False, mlp_kwargs=self._mlp_kwargs)
 
-        self.decoder = EdgeWeightDecoder(max_nodes=self.max_num_nodes, init_node_stack=self.node_stack, init_edge_stack=self.edge_stack, prob_mpg_stack=self.decoder_mpg_stack, multi_edge_repeat=self.multi_edge_repeat, mlp_kwargs=self._mlp_kwargs)
+        self.decoder = EdgeWeightDecoder(
+            max_nodes=self.max_num_nodes, max_edge_iter=self.max_edge_iter, init_node_stack=self.node_stack, init_edge_stack=self.edge_stack, prob_mpg_stack=self.decoder_mpg_stack, multi_edge_repeat=self.multi_edge_repeat, mlp_kwargs=self._mlp_kwargs
+        )
 
-    def __call__(self, x):
+    def __call__(self, x, gumbel_temperature):
         mu_wo_noise = self.encoder(x).globals
         log_sigma_wo_noise = self.sigma_encoder(x).globals
         sigma_wo_noise = jnp.exp(log_sigma_wo_noise)
@@ -43,20 +46,20 @@ class EdgeWeightGAE(nn.Module):
 
         # Add the node and edge info after adding noise
         z = jnp.vstack((z_wo_node.transpose(), x.n_node, x.n_edge)).transpose()
-        reconstructed, edge_weights = self.decoder(z)
+        reconstructed, edge_weights = self.decoder(z, gumbel_temperature)
         return reconstructed, edge_weights, mu_wo_noise, log_sigma_wo_noise
 
-    def decode(self, z):
-        return self.decoder(z)
+    def decode(self, z, gumbel_temperature, gumbel_rng):
+        return self.decoder(z, gumbel_temperature, rngs={"gumbel": gumbel_rng})
 
     def encode(self, x):
         return self.encoder(x)
 
-    def encode_decode(self, x):
+    def encode_decode(self, x, gumbel_rng):
         mu_wo_node = self.encoder(x).globals
         # Add the node and edge info after adding noise
         z = jnp.vstack((mu_wo_node.transpose(), x.n_node, x.n_edge)).transpose()
-        reconstructed, edge_weights = self.decoder(z)
+        reconstructed, edge_weights = self.decoder(z, rngs={"gumbel": gumbel_rng})
         return reconstructed, edge_weights
 
 
@@ -75,17 +78,14 @@ def pre_loss_function(params, train_state, in_graphs, rngs, metric_state):
 
     recon_loss = jnp.sqrt(jnp.mean((in_metric - out_metric) ** 2))
     kl_divergence = -0.5 * jnp.sum(1 + log_sigma[:-1] - jnp.square(mu[:-1]) - jnp.exp(log_sigma[:-1]))
-    sharp_loss = edge_weights_sharpness_loss(edge_weights[:-1])
-    n_edge_compare = in_graphs.n_edge
-    n_edge_loss = edge_weights_n_edge_loss(edge_weights[:-1], n_edge_compare[:-1])
 
-    return recon_loss, kl_divergence, sharp_loss, n_edge_loss
+    return recon_loss, kl_divergence
 
 
 def loss_function(params, train_state, in_graphs, rngs, metric_state):
-    recon_loss, kl_divergence, sharp_loss, n_edge_loss = pre_loss_function(params, train_state, in_graphs, rngs, metric_state)
+    recon_loss, kl_divergence = pre_loss_function(params, train_state, in_graphs, rngs, metric_state)
 
-    return jnp.sqrt(recon_loss) + kl_divergence + sharp_loss * n_edge_loss
+    return recon_loss + kl_divergence
 
 
 def train_step(batch_train, batch_test, train_state, rng, metric_state):
@@ -94,15 +94,15 @@ def train_step(batch_train, batch_test, train_state, rng, metric_state):
 
     loss_grad_fn = jax.value_and_grad(loss_fn)
 
-    rng, rng_reparametrize_train, rng_reparametrize_test, rng_drop_train, rng_drop_test = jax.random.split(rng, 5)
+    rng, rng_reparametrize_train, rng_reparametrize_test, rng_drop_train, rng_drop_test, rng_gumbel_train, rng_gumbel_test = jax.random.split(rng, 7)
 
-    rngs_train = {"reparametrize": rng_reparametrize_train, "dropout": rng_drop_train}
-    rngs_test = {"reparametrize": rng_reparametrize_test, "dropout": rng_drop_test}
+    rngs_train = {"reparametrize": rng_reparametrize_train, "dropout": rng_drop_train, "gumbel": rng_gumbel_train}
+    rngs_test = {"reparametrize": rng_reparametrize_test, "dropout": rng_drop_test, "gumbel": rng_gumbel_test}
 
-    train_recon, train_kl, train_sharp, train_n_edge = pre_loss_fn(train_state.params, train_state, batch_train, rngs_train)
-    test_recon, test_kl, test_sharp, test_n_edge = pre_loss_fn(train_state.params, train_state, batch_test, rngs_test)
+    train_recon, train_kl = pre_loss_fn(train_state.params, train_state, batch_train, rngs_train)
+    test_recon, test_kl = pre_loss_fn(train_state.params, train_state, batch_test, rngs_test)
 
     train_loss, grads = loss_grad_fn(train_state.params, train_state, batch_train, rngs_train)
     train_state = train_state.apply_gradients(grads=grads)
 
-    return train_state, train_loss, train_recon, train_kl, train_sharp, train_n_edge, test_recon, test_kl, test_sharp, test_n_edge
+    return train_state, train_loss, train_recon, train_kl, test_recon, test_kl

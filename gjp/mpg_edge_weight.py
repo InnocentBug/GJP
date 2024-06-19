@@ -1,3 +1,4 @@
+import functools
 from typing import Dict, Optional, Sequence
 
 import jax
@@ -6,30 +7,7 @@ import jax.tree_util as tree
 import jraph
 from flax import linen as nn
 
-from .model import MLP
-
-
-@jax.jit
-def split_and_sum(array, indices):
-    cumsum_tmp = jnp.cumsum(
-        array,
-        axis=0,
-    )
-    cumsum = jnp.vstack([jnp.zeros((1,) + array.shape[1:]), cumsum_tmp])
-    end_cums = cumsum[jnp.cumsum(indices)]
-
-    diff_out_results = jnp.diff(end_cums, prepend=0, axis=0)
-    return diff_out_results
-
-
-@jax.jit
-def split_and_mean(array, indices):
-    cumsum_tmp = jnp.cumsum(array, axis=0)
-    cumsum = jnp.vstack([jnp.zeros((1,) + array.shape[1:]), cumsum_tmp])
-    end_cums = cumsum[jnp.cumsum(indices)]
-
-    diff_out_results = jnp.diff(end_cums, prepend=0, axis=0)
-    return diff_out_results / (indices[:, None] + 1e-9)
+from .model import MLP, split_and_mean, split_and_sum
 
 
 class MessagePassingLayerEW(nn.Module):
@@ -183,54 +161,85 @@ class MessagePassingEW(nn.Module):
         return tmp_graphs
 
 
-def amplify_values_threshold(values, threshold):
-
-    values -= threshold
-    values /= jnp.var(values) + 1
-    values = nn.sigmoid(values)
-
-    return values
+def _tanh_filter(x, factor=1):
+    return (1 + jnp.tanh((x - 0.5) * 2 * jnp.pi * factor)) / 2.0
 
 
-def amplify_values_inner(values, N, num_thresholds):
-    thresholds = jnp.linspace(0, 1, num_thresholds)
+def gumbel_softmax_sample(logits, temperature, rng, mask=None, axis=-1):
+    """
+    @article{jang2016categorical,
+    title={Categorical reparameterization with gumbel-softmax},
+    author={Jang, Eric and Gu, Shixiang and Poole, Ben},
+    journal={arXiv preprint arXiv:1611.01144},
+    year={2016}
+    }
+    """
+    gumbel_noise = jax.random.gumbel(rng, logits.shape)
+    random_sample = (logits + gumbel_noise) / temperature
+    if mask is not None:
+        tanh_mask = _tanh_filter(mask)
+        random_sample *= 1 - tanh_mask
 
-    def inner(t):
-        ampl = amplify_values_threshold(values, t)
-        result = jnp.abs(jnp.sum(ampl, axis=0) - N)
-        return result
-
-    func = jax.vmap(inner, in_axes=0)
-    result = func(thresholds)
-
-    idx = jnp.argmin(result)
-
-    return amplify_values_threshold(values, thresholds[idx])
+    softmax = jax.nn.softmax(random_sample, axis=axis)
+    return softmax
 
 
-def amplify_values(values, N, iterations, num_thresholds):
-    result = values
-    for _i in range(iterations):
-        result = amplify_values_inner(result, N, num_thresholds)
-    return result
+def gumbel_topk(x, k, max_iter, rng, temperature, pre_mask=None, pre_filter=None):
+
+    if pre_filter is not None:
+        x = pre_filter(x)
+    if pre_mask is None:
+        pre_mask = jnp.zeros(x.shape)
+    else:
+        k += jnp.sum(pre_mask, axis=1)
+    init_val = (rng, pre_mask)
+
+    mask_filter = functools.partial(_tanh_filter, factor=2)
+
+    def _inner_gumbel_topk(i, val):
+        val_rng, mask = val
+        return_rng, gumbel_rng = jax.random.split(val_rng)
+        sample = gumbel_softmax_sample(x, temperature, gumbel_rng, mask=mask, axis=1)
+
+        new_mask = mask_filter(mask + sample)
+
+        old_diff = jnp.abs(jnp.sum(mask, axis=1) - k)
+        new_diff = jnp.abs(jnp.sum(new_mask, axis=1) - k)
+
+        update_logic = new_diff < old_diff
+        update_logic = (jnp.tanh((old_diff - new_diff) * 2 * jnp.pi) + 1) / 2
+
+        mask = mask_filter(mask + update_logic[:, None] * sample)
+
+        return return_rng, mask
+
+    return_rng, mask = jax.lax.fori_loop(0, max_iter, _inner_gumbel_topk, init_val)
+
+    return mask
 
 
 def edge_weights_sharpness_loss(edge_weights, factor=2):
-    data = -(edge_weights**2) + edge_weights
+    data_clean = jnp.clip(edge_weights, 0, 1)
+
+    data_extra = edge_weights - data_clean
+    extra_val = jnp.sum(jnp.abs(data_extra))
+
+    data = -(data_clean**2) + data_clean
     data = factor**2 * data
 
     # Just better then mean.
     # Not meant to be differentiable
     n_elements = 1 + jnp.sum(data > 1e-5)
-    loss = jnp.sum(data) / n_elements
 
-    loss *= jnp.max(data)
+    loss = jnp.sum(data) / n_elements + (jnp.sqrt(extra_val + 1e-3) + extra_val**2) / 2
 
-    return jnp.sqrt(loss)
+    return loss
 
 
 def edge_weights_n_edge_loss(edge_weights, n_edge):
     a = jnp.sum(edge_weights, axis=1)
-    b = a - n_edge
-    loss = jnp.mean(b**2) + jnp.mean(jnp.abs(b)) + jnp.max(jnp.abs(b))
+    la = n_edge.flatten()
+    b = a - la
+
+    loss = jnp.mean(b**2) + jnp.mean(jnp.abs(b))
     return loss

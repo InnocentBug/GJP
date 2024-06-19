@@ -1,3 +1,4 @@
+import random
 from functools import partial
 
 import flax.linen as nn
@@ -12,97 +13,162 @@ from utils import compare_graphs
 from gjp import MLP, bag_gae, edge_weight_decoder, mpg_edge_weight
 
 
-@pytest.mark.parametrize("seed, size", [(12, 10), (14, 100), (11, 50)])
-def test_amplify_values(seed, size):
-    num_thresholds = 25
-    iterations = 2
+@pytest.mark.parametrize("seed", [11, 12, 42])
+def test_gumbel_topk_val(seed):
+    n_batch = 5
+    n_size = 4
+    temperature = 1
+    rng = jax.random.key(seed)
 
-    func = partial(mpg_edge_weight.amplify_values, iterations=iterations, num_thresholds=num_thresholds)
-    jit_junc = jax.jit(func)
+    x = jax.random.normal(rng, (n_batch, n_size))
+    n_edge = jnp.asarray([0.0, 1, 2.0, 3, 4.0])
 
-    key = jax.random.key(42)
-    values = jax.random.uniform(key, (size,))
+    edge_weights = mpg_edge_weight.gumbel_topk(x, n_edge, n_size * 2 + 2, rng, temperature, pre_filter=jax.nn.sigmoid)
+    lossA = mpg_edge_weight.edge_weights_sharpness_loss(edge_weights)
+    lossB = mpg_edge_weight.edge_weights_n_edge_loss(edge_weights, n_edge)
 
-    for i in range(size - 3):
-        result = jit_junc(values, i)
-        assert jnp.abs(i - jnp.sum(result)) < 1.5
+    print(lossA, lossB)
+    # print(edge_weights)
+
+    assert lossA < 0.1
+    assert lossB < 0.1
 
 
-@pytest.mark.parametrize("final_size", [1, 10, 100])
-def test_train_edge_weights(jax_rng, final_size):
+@pytest.mark.parametrize("seed, temperature", [(145, 1), (234, 0.75), (34, 0.5), (541, 0.1)])
+def test_gumbel_topk_grad(seed, temperature):
+    n_batch = 5
+    n_size = 4
+    rng = jax.random.key(seed)
 
-    def train_step(data, n_edge, state):
-        def loss_function(params, data):
-            edge_weights = state.apply_fn(params, data)
+    rng, use_rng = jax.random.split(rng)
+    x = jax.random.normal(use_rng, (n_batch, n_size))
+    rng, use_rng = jax.random.split(rng)
+    y = jax.random.normal(use_rng, (n_batch, n_size))
 
-            justifier = jax.vmap(partial(mpg_edge_weight.amplify_values, iterations=2, num_thresholds=25), in_axes=0)
-            edge_weights = justifier(edge_weights, n_edge)
+    # Gradients for 0 are going to be zero
+    n_edge = jnp.asarray([1, 2.0, 3, 2, 4.0])
+
+    def loss_function(x, y, rng):
+        edge_weights = mpg_edge_weight.gumbel_topk(x, n_edge, n_size + 2, rng, temperature, pre_filter=jax.nn.sigmoid)
+        lossA = mpg_edge_weight.edge_weights_sharpness_loss(edge_weights)
+        lossB = mpg_edge_weight.edge_weights_n_edge_loss(edge_weights, n_edge)
+        lossC = jnp.mean(y * edge_weights)
+        return lossA + lossB + lossC
+
+    jit_loss = jax.jit(jax.value_and_grad(loss_function))
+
+    for i in range(5):
+        rng, use_rng = jax.random.split(rng)
+        val, grad = jit_loss(x, y, use_rng)
+        print(grad)
+        non_zero = jnp.nonzero(grad)[0].size
+        # Heuristics to make sure our gradients aren't 0 in too many places
+        assert grad.size - non_zero < 1 / temperature + 4
+
+
+@pytest.mark.parametrize("final_size, temperature", [(4, 0.5), (20, 0.1), (100, 0.25)])
+def test_train_edge_weights(jax_rng, final_size, temperature):
+    def train_step(data, n_edge, state, val_x, val_y, temperature, gumbel_rng):
+        def loss_function(params, data_x, data_y):
+            edge_weights = state.apply_fn(params, data_x, temperature, rngs={"gumbel": gumbel_rng})
+
             lossA = mpg_edge_weight.edge_weights_sharpness_loss(edge_weights)
-            lossB = mpg_edge_weight.edge_weights_n_edge_loss(edge_weights, n_edge)
-            return lossA * lossB + jnp.max(jnp.asarray([lossA, lossB]))
+            lossB = mpg_edge_weight.edge_weights_n_edge_loss(edge_weights, data_y)
+            return lossA + lossB
 
-        val, grads = jax.value_and_grad(loss_function)(state.params, data)
+        val, grads = jax.value_and_grad(loss_function)(state.params, data, n_edge)
+
+        val_weights = state.apply_fn(params, val_x, temperature, rngs={"gumbel": gumbel_rng})
+        lossA = mpg_edge_weight.edge_weights_sharpness_loss(val_weights)
+        lossB = mpg_edge_weight.edge_weights_n_edge_loss(val_weights, val_y)
+
         state = state.apply_gradients(grads=grads)
-        return state, val
+        return state, val, lossA, lossB
 
     class Model(nn.Module):
         final_size: int
 
         @nn.compact
-        def __call__(self, x):
-            mlp_a = MLP([32, 64, 32, 32])
-            mlp_b = MLP([self.final_size], activation=nn.sigmoid)
+        def __call__(self, x, temperature):
+            n_edge = x[:, -1]
+            mlp_a = MLP([32, 64, 64, 32, final_size])
 
             def func(x):
                 x = mlp_a(x)
-                x = mlp_b(x)
                 return x
 
             x = jax.vmap(func)(x)
+            rng = self.make_rng("gumbel")
+            x = mpg_edge_weight.gumbel_topk(x, n_edge, final_size + 10, rng, temperature, pre_filter=jax.nn.sigmoid)
+
+            # x = (jnp.tanh( (x-0.5)*2*jnp.pi) + 1)/2
+            # jax.debug.print("x {}", x)
+            # jax.debug.print("n_edge {}", n_edge)
             return x
 
-    num_array = 3
+    num_array = 400
     rng, jax_rng = jax.random.split(jax_rng)
     test_input = jax.random.normal(jax_rng, (num_array, 2))
 
-    n_edge = jax.random.randint(jax_rng, (num_array, 1), 0, final_size + 1, dtype=int)
-    # test_input = jnp.hstack([test_input, n_edge])
+    n_edge = jax.random.randint(jax_rng, (num_array, 1), 0, final_size, dtype=int)
+    test_input = jnp.hstack([test_input, n_edge])
+
+    test_input = n_edge
+
+    train_frac = 0.9
+    train_x = test_input[: int(num_array * train_frac)]
+    test_x = test_input[int(num_array * train_frac) :]
+    train_y = n_edge[: int(num_array * train_frac)]
+    test_y = n_edge[int(num_array * train_frac) :]
+
+    batch_frac = 0.1
+    batch_x = []
+    batch_y = []
+
+    start = 0
+    end = int(num_array * train_frac * batch_frac)
+    while end < int(num_array * train_frac):
+        batch_x += [train_x[start:end]]
+        batch_y += [train_y[start:end]]
+
+        start = end
+        end += int(num_array * train_frac * batch_frac)
 
     model = Model(final_size)
-    params = model.init(jax_rng, test_input)
-    val_a = model.apply(params, test_input)
-    print(val_a)
-    assert mpg_edge_weight.edge_weights_sharpness_loss(val_a) > 0.1
-    assert mpg_edge_weight.edge_weights_n_edge_loss(val_a, n_edge) > 0.1
+    rng, init, gumbel = jax.random.split(jax_rng, 3)
 
-    tx = optax.adamw(learning_rate=1e-3)
+    params = model.init({"params": init, "gumbel": gumbel}, test_input, temperature)
+
+    # rng, gumbel = jax.random.split(rng)
+    # val_a = model.apply(params, test_x, temperature=temperature, rngs={"gumbel": gumbel})
+    # assert mpg_edge_weight.edge_weights_sharpness_loss(val_a) > 0.1
+    # assert mpg_edge_weight.edge_weights_n_edge_loss(val_a, n_edge) > 0.1
+
+    tx = optax.adamw(learning_rate=1e-2)
     opt_state = tx.init(params)
     state = TrainState(params=params, apply_fn=model.apply, tx=tx, opt_state=opt_state, step=0)
 
-    # TO FIX
     jit_step = jax.jit(train_step)
-    jit_step = train_step
 
-    last_loss = None
-    for i in range(1000):
-        state, val = jit_step(test_input, n_edge, state)
+    for i in range(10 * final_size):
+        perm = list(range(len(batch_x)))
+        random.shuffle(perm)
+        for j in perm:
+            rng, gumbel = jax.random.split(rng)
+            state, loss, val_lossA, val_lossB = jit_step(batch_x[j], batch_y[j], state, test_x, test_y, temperature, gumbel)
         if i % 10 == 0:
-            print(val)
-            if last_loss is not None:
-                assert val <= 1000 * last_loss
-            if last_loss is None or val < last_loss:
-                last_loss = val
+            print(i, loss, val_lossA, val_lossB)
 
-    val_b = model.apply(state.params, test_input)
-    print(val_b)
-    print(n_edge)
+    rng, gumbel = jax.random.split(rng)
+    val_b = model.apply(state.params, test_x, temperature, rngs={"gumbel": gumbel})
     lossA = mpg_edge_weight.edge_weights_sharpness_loss(val_b)
-    lossB = mpg_edge_weight.edge_weights_n_edge_loss(val_b, n_edge)
+    lossB = mpg_edge_weight.edge_weights_n_edge_loss(val_b, test_y)
     print(lossA, lossB)
 
-    assert mpg_edge_weight.edge_weights_sharpness_loss(val_b) < 0.1
-    assert mpg_edge_weight.edge_weights_n_edge_loss(val_b, n_edge) < 0.1
-    for i, n in enumerate(n_edge):
+    assert lossA < 0.1
+    assert lossB < 0.1
+    for i, n in enumerate(test_y):
+
         assert jnp.abs(jnp.sum(val_b[i]) - n) < 0.1
 
 

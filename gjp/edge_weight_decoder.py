@@ -8,7 +8,7 @@ import jraph
 import numpy as np
 
 from .model import MLP
-from .mpg_edge_weight import MessagePassingEW
+from .mpg_edge_weight import MessagePassingEW, gumbel_topk
 
 
 @dataclass
@@ -59,6 +59,7 @@ class FullyConnectedGraph:
 
 class EdgeWeightDecoder(nn.Module):
     max_nodes: int
+    max_edge_iter: int
     init_node_stack: Sequence[int]
     init_edge_stack: Sequence[int]
     prob_mpg_stack: Sequence[Sequence[int]]
@@ -102,18 +103,26 @@ class EdgeWeightDecoder(nn.Module):
 
         self.edge_generator = jax.vmap(_edge_generator)
 
-        def _smooth_prob(edge_weight, sub_x):
-            n_node = sub_x[-2]
+        def smooth_prob(edge_weight, x, gumbel_temperature):
+            def _get_pre_mask(sub_x):
+                n_node = sub_x[-2]
+                logic = jnp.arange(self.max_edges, dtype=int) >= n_node**2 * self.multi_edge_repeat
+                return logic.astype(float)
+
+            get_pre_mask = jax.vmap(_get_pre_mask)
+            pre_mask = get_pre_mask(x)
 
             edge_weight = nn.sigmoid(edge_weight)
 
             # Mask out invalid edges of the buffer graph
-            logic = jnp.arange(self.max_edges, dtype=int) < n_node**2 * self.multi_edge_repeat
-            edge_weight = logic * edge_weight
+            edge_weight = edge_weight * (1 - pre_mask)
+            n_edges = x[:, -1]
+            edge_weight = gumbel_topk(edge_weight, n_edges, self.max_edge_iter, self.make_rng("gumbel"), gumbel_temperature, pre_mask=pre_mask)
+            edge_weight = edge_weight * (1 - pre_mask)
 
             return edge_weight
 
-        self.smooth_prob = jax.vmap(_smooth_prob)
+        self.smooth_prob = smooth_prob
 
         self.prob_mpg = MessagePassingEW(node_feature_sizes=None, edge_feature_sizes=self.prob_mpg_stack + ((1,),), global_feature_sizes=None, mean_instead_of_sum=True, mlp_kwargs=self._mlp_kwargs)
 
@@ -121,7 +130,7 @@ class EdgeWeightDecoder(nn.Module):
             node_feature_sizes=self.prob_mpg_stack + ((self.init_node_stack[-1],),), edge_feature_sizes=self.prob_mpg_stack + ((self.init_edge_stack[-1],),), global_feature_sizes=None, mean_instead_of_sum=True, mlp_kwargs=self._mlp_kwargs
         )
 
-    def __call__(self, x):
+    def __call__(self, x, gumbel_temperature):
         nodes = self.node_generator(x)
         edges = self.edge_generator(x)
         graph = self.graph_generator(x)
@@ -132,7 +141,7 @@ class EdgeWeightDecoder(nn.Module):
         prob_graph = self.prob_mpg(graph)
 
         probabilities = prob_graph.edges.reshape((x.shape[0], self.max_edges))
-        edge_weights = self.smooth_prob(probabilities, x)
+        edge_weights = self.smooth_prob(probabilities, x, gumbel_temperature)
 
         final_graph = self.final_mpg(graph, edge_weights)
 
