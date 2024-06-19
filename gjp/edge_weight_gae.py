@@ -78,10 +78,10 @@ def pre_loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel
     return recon_loss, kl_divergence
 
 
-def loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature):
+def loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature, recon_boost=1000.0):
     recon_loss, kl_divergence = pre_loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature)
 
-    return recon_loss + kl_divergence
+    return recon_boost * recon_loss + kl_divergence
 
 
 def train_step(batch_train, batch_test, train_state, rng, metric_state, gumbel_temperature):
