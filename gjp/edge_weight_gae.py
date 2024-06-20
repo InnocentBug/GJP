@@ -16,6 +16,7 @@ class EdgeWeightGAE(nn.Module):
     node_stack: Sequence[int]
     edge_stack: Sequence[int]
     decoder_mpg_stack: Sequence[Sequence[int]]
+    arch_only: bool = False
     multi_edge_repeat: int = 1
     mlp_kwargs: dict[str, Any] | None = None
 
@@ -29,7 +30,14 @@ class EdgeWeightGAE(nn.Module):
         self.sigma_encoder = MessagePassingEW(node_feature_sizes=self.encoder_stack, edge_feature_sizes=self.encoder_stack, global_feature_sizes=self.encoder_stack, mean_instead_of_sum=False, mlp_kwargs=self._mlp_kwargs)
 
         self.decoder = EdgeWeightDecoder(
-            max_nodes=self.max_num_nodes, max_edge_iter=self.max_edge_iter, init_node_stack=self.node_stack, init_edge_stack=self.edge_stack, prob_mpg_stack=self.decoder_mpg_stack, multi_edge_repeat=self.multi_edge_repeat, mlp_kwargs=self._mlp_kwargs
+            max_nodes=self.max_num_nodes,
+            max_edge_iter=self.max_edge_iter,
+            init_node_stack=self.node_stack,
+            init_edge_stack=self.edge_stack,
+            prob_mpg_stack=self.decoder_mpg_stack,
+            multi_edge_repeat=self.multi_edge_repeat,
+            mlp_kwargs=self._mlp_kwargs,
+            arch_only=self.arch_only,
         )
 
     def __call__(self, x, gumbel_temperature):
@@ -59,7 +67,9 @@ class EdgeWeightGAE(nn.Module):
         return reconstructed, edge_weights
 
 
-def pre_loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature):
+def pre_loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature, arch_only):
+    if arch_only:
+        in_graphs = in_graphs._replace(nodes=0 * in_graphs.nodes, edges=0 * in_graphs.edges)
     in_metric = metric_state.apply_fn(metric_state.params, in_graphs).globals[:-1]
 
     tmp_out_graphs, edge_weights, mu, log_sigma = train_state.apply_fn(params, in_graphs, gumbel_temperature, rngs=rngs)
@@ -78,15 +88,15 @@ def pre_loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel
     return recon_loss, kl_divergence
 
 
-def loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature, recon_boost=1000.0):
-    recon_loss, kl_divergence = pre_loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature)
+def loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature, arch_only, recon_boost=1000.0):
+    recon_loss, kl_divergence = pre_loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature, arch_only)
 
     return recon_boost * recon_loss + kl_divergence
 
 
-def train_step(batch_train, batch_test, train_state, rng, metric_state, gumbel_temperature):
-    loss_fn = partial(loss_function, metric_state=metric_state, gumbel_temperature=gumbel_temperature)
-    pre_loss_fn = partial(pre_loss_function, metric_state=metric_state, gumbel_temperature=gumbel_temperature)
+def train_step(batch_train, batch_test, train_state, rng, metric_state, gumbel_temperature, arch_only):
+    loss_fn = partial(loss_function, metric_state=metric_state, gumbel_temperature=gumbel_temperature, arch_only=arch_only)
+    pre_loss_fn = partial(pre_loss_function, metric_state=metric_state, gumbel_temperature=gumbel_temperature, arch_only=arch_only)
 
     loss_grad_fn = jax.value_and_grad(loss_fn)
 

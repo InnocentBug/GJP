@@ -63,6 +63,7 @@ class EdgeWeightDecoder(nn.Module):
     init_node_stack: Sequence[int]
     init_edge_stack: Sequence[int]
     prob_mpg_stack: Sequence[Sequence[int]]
+    arch_only: bool = False
     multi_edge_repeat: int = 1
     mlp_kwargs: dict[str, Any] | None = None
 
@@ -126,9 +127,10 @@ class EdgeWeightDecoder(nn.Module):
 
         self.prob_mpg = MessagePassingEW(node_feature_sizes=None, edge_feature_sizes=self.prob_mpg_stack + ((1,),), global_feature_sizes=None, mean_instead_of_sum=True, mlp_kwargs=self._mlp_kwargs)
 
-        self.final_mpg = MessagePassingEW(
-            node_feature_sizes=self.prob_mpg_stack + ((self.init_node_stack[-1],),), edge_feature_sizes=self.prob_mpg_stack + ((self.init_edge_stack[-1],),), global_feature_sizes=None, mean_instead_of_sum=True, mlp_kwargs=self._mlp_kwargs
-        )
+        if not self.arch_only:
+            self.final_mpg = MessagePassingEW(
+                node_feature_sizes=self.prob_mpg_stack + ((self.init_node_stack[-1],),), edge_feature_sizes=self.prob_mpg_stack + ((self.init_edge_stack[-1],),), global_feature_sizes=None, mean_instead_of_sum=True, mlp_kwargs=self._mlp_kwargs
+            )
 
     def __call__(self, x, gumbel_temperature):
         nodes = self.node_generator(x)
@@ -137,13 +139,18 @@ class EdgeWeightDecoder(nn.Module):
 
         new_globals = jnp.hstack([x, x * 0]).reshape(2 * x.shape[0], x.shape[1])
 
-        graph = graph._replace(nodes=nodes.reshape((nodes.shape[0] * nodes.shape[1], nodes.shape[2])), edges=edges.reshape((edges.shape[0] * edges.shape[1], edges.shape[2])), globals=new_globals)
+        reshaped_nodes = nodes.reshape((nodes.shape[0] * nodes.shape[1], nodes.shape[2]))
+        reshaped_edges = edges.reshape((edges.shape[0] * edges.shape[1], edges.shape[2]))
+        graph = graph._replace(nodes=reshaped_nodes, edges=reshaped_edges, globals=new_globals)
         prob_graph = self.prob_mpg(graph)
 
         probabilities = prob_graph.edges.reshape((x.shape[0], self.max_edges))
         edge_weights = self.smooth_prob(probabilities, x, gumbel_temperature)
 
-        final_graph = self.final_mpg(graph, edge_weights)
+        if self.arch_only:
+            final_graph = graph._replace(nodes=0 * reshaped_nodes, edges=0 * reshaped_edges)
+        else:
+            final_graph = self.final_mpg(graph, edge_weights)
 
         return final_graph, edge_weights
 
