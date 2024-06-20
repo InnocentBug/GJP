@@ -1,5 +1,4 @@
 import hashlib
-import os
 
 import jax
 import jax.numpy as jnp
@@ -7,7 +6,7 @@ import jraph
 import pytest
 from flax import linen as nn
 
-from gjp import bag_decoder, metric_util, mpg
+from gjp import bag_decoder, mpg
 
 MLP_KWARGS = {"dropout_rate": 0.1, "deterministic": False, "activation": nn.sigmoid}
 
@@ -140,7 +139,7 @@ def test_init_bag_graph(max_num_nodes, multi_edge_repeat, stack, mpg_stack, jax_
     m.update(test_input.tobytes())
 
     original_path, _ = ensure_tempfile
-    metric_util.svg_graph_list(unbatch_nodes, filename=os.path.join(original_path, f"la_graph{m.hexdigest(3)}.pdf"))
+    # metric_util.svg_graph_list(unbatch_nodes, filename=os.path.join(original_path, f"la_graph{m.hexdigest(3)}.pdf"))
 
     for i, graph in enumerate(unbatch_nodes):
         if i % 2 == 0:
@@ -212,7 +211,7 @@ def test_bag_graph_decode(max_num_nodes, multi_edge_repeat, stack, mpg_stack, ja
     m.update(test_input.tobytes())
 
     original_path, _ = ensure_tempfile
-    metric_util.svg_graph_list(unbatch_nodes, filename=os.path.join(original_path, f"final_decode_graph{m.hexdigest(3)}.pdf"))
+    # metric_util.svg_graph_list(unbatch_nodes, filename=os.path.join(original_path, f"final_decode_graph{m.hexdigest(3)}.pdf"))
 
     for i, graph in enumerate(unbatch_nodes):
         if i % 2 == 0:

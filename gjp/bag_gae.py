@@ -61,11 +61,14 @@ class BagGAE(nn.Module):
         return reconstructed
 
 
-def find_multi_edge_repeat(batched_graph):
+def find_multi_edge_repeat(batched_graph, ignore_node=None):
     edge_count_map = {}
     for a, b in zip(batched_graph.senders, batched_graph.receivers):
         a = int(a)
         b = int(b)
+        if ignore_node is not None:
+            if a >= ignore_node or b >= ignore_node:
+                continue
         try:
             edge_count_map[(a, b)] += 1
         except KeyError:
