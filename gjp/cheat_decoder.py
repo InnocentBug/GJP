@@ -1,4 +1,4 @@
-from typing import Sequence
+from typing import Sequence, Any
 
 import jax
 import jax.numpy as jnp
@@ -21,17 +21,73 @@ def indexify_graph(graph):
     return graph
 
 
+def batch_graph_arrays(graph, max_edges:int, max_nodes:int):
+    max_num_edges = int(max_edges)
+    def mask_builder(n_edge, cumsum, node_cumsum):
+        mask = jnp.arange(max_num_edges) < n_edge
+        pad_widths = ((0, max(0, max_edges-graph.edges.shape[0])), (0, 0))
+        pad_edges = jnp.pad(graph.edges, pad_widths)
+        pad_senders = jnp.pad(graph.senders, pad_widths[0])
+        pad_receivers = jnp.pad(graph.receivers, pad_widths[0])
+
+        senders = jnp.roll(pad_senders, -cumsum)[:max_edges] - node_cumsum
+        receivers = jnp.roll(pad_receivers, -cumsum)[:max_edges] - node_cumsum
+        senders = mask * senders
+        receivers = mask * receivers
+
+        edges = jnp.roll(pad_edges, -cumsum, axis=0)[:max_edges]
+        edges = mask[:,None] * edges
+
+        return mask, senders, receivers, edges
+    cumsum = jnp.concatenate((jnp.zeros((1,)), jnp.cumsum(graph.n_edge[:-1], dtype=int)))
+    node_cumsum = jnp.concatenate((jnp.zeros((1,)), jnp.cumsum(graph.n_node[:-1], dtype=int) ))
+
+    mask, senders, receivers, edges = jax.vmap(mask_builder)(graph.n_edge, cumsum, node_cumsum)
+    fill_array = jnp.repeat(graph.n_node, max_edges).reshape((graph.n_edge.shape[0], max_edges))
+
+    senders = senders + jnp.arange(senders.shape[0])[:, None] * int(max_nodes)
+    receivers = receivers + jnp.arange(receivers.shape[0])[:, None] * int(max_nodes)
+    fill_array = fill_array + jnp.arange(fill_array.shape[0])[:, None] * int(max_nodes)
+
+    mask = mask.flatten()
+    senders = senders.flatten()
+    receivers = receivers.flatten()
+    fill_array = fill_array.flatten()
+    edges = edges.reshape((edges.shape[0]*edges.shape[1], edges.shape[2]))
+
+    senders = senders * mask + (1-mask) * fill_array
+    receivers = receivers * mask + (1-mask) * fill_array
+
+    def node_builder(n_node, tmp_cumsum):
+        mask = jnp.arange(max_nodes) < n_node
+        pad_widths = ((0, max(0, max_nodes-graph.nodes.shape[0])), (0, 0))
+        pad_nodes = jnp.pad(graph.nodes, pad_widths)
+        nodes = jnp.roll(pad_nodes, -tmp_cumsum, axis=0)[:max_nodes]
+        print(mask.shape, nodes.shape, graph.nodes.shape)
+        nodes = mask[:,None] * nodes
+        return nodes
+    node_cumsum = jnp.concatenate((jnp.zeros((1,)), jnp.cumsum(graph.n_node[:-1], dtype=int) ))
+    nodes = jax.vmap(node_builder)(graph.n_node, node_cumsum)
+
+    nodes = nodes.reshape((nodes.shape[0]*nodes.shape[1], nodes.shape[2]))
+
+    return senders, receivers, edges, nodes
+
 class CheatDecoder(nn.Module):
     max_nodes: int
     max_edges: int
     arch_stack: Sequence[int]
     node_stack: Sequence[int]
     edge_stack: Sequence[int]
+    mlp_kwargs: dict[str, Any] | None = None
 
     def setup(self):
-        self.arch_mlp = MLP(self.arch_stack + (2 * self.max_edges,))
-        self.node_mlp = MLP(self.node_stack[:-1] + (self.max_nodes * self.node_stack[-1],))
-        self.edge_mlp = MLP(self.edge_stack[:-1] + (self.max_edges * self.edge_stack[-1],))
+        self._mlp_kwargs = self.mlp_kwargs
+        if self._mlp_kwargs is None:
+            self._mlp_kwargs = {}
+        self.arch_mlp = MLP(self.arch_stack + (2 * self.max_edges,), **self._mlp_kwargs)
+        self.node_mlp = MLP(self.node_stack[:-1] + (self.max_nodes * self.node_stack[-1],), **self._mlp_kwargs)
+        self.edge_mlp = MLP(self.edge_stack[:-1] + (self.max_edges * self.edge_stack[-1],), **self._mlp_kwargs)
 
         def _get_send_recv(x):
             n_edge = x[-1]
