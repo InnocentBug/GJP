@@ -48,8 +48,8 @@ def test_edge_weight_gae(batch_graphs, mlp_kwargs):
         assert out_graph.n_node == in_graph.n_node
 
 
-@pytest.mark.parametrize("gumbel_temperature", [1, 0.5, 0.1, 0.05])
-def test_ew_loss_function(batch_graphs, mlp_kwargs, gumbel_temperature):
+@pytest.mark.parametrize("gumbel_temperature, arch_only", [(1, True), (0.5, False), (0.1, True), (0.05, False)])
+def test_ew_loss_function(batch_graphs, mlp_kwargs, gumbel_temperature, arch_only):
     max_num_nodes = jnp.max(batch_graphs.n_node) + 1
     max_edge_iter = jnp.max(batch_graphs.n_edge) + 10
     multi_edge_repeat = bag_gae.find_multi_edge_repeat(batch_graphs)
@@ -76,7 +76,6 @@ def test_ew_loss_function(batch_graphs, mlp_kwargs, gumbel_temperature):
     tx = optax.adam(learning_rate=1e-3)
     opt_state = tx.init(params)
     train_state = TrainState(step=0, apply_fn=model.apply, params=params, tx=tx, opt_state=opt_state)
-    # train_state.apply_fn(train_state.params, batch_graphs, gumbel_temperature, rngs={"reparametrize": rng_split_a, "dropout": rng_split_b, "gumbel": rng_split_c})
 
     metric_model = mpg_edge_weight.MessagePassingEW(
         node_feature_sizes=mpg_stack,
@@ -88,7 +87,7 @@ def test_ew_loss_function(batch_graphs, mlp_kwargs, gumbel_temperature):
     metric_params = metric_model.init(rng_split, batch_graphs)
     metric_state = TrainState(apply_fn=metric_model.apply, params=metric_params, step=None, tx=None, opt_state=None)
 
-    partial_step = partial(edge_weight_gae.train_step, metric_state=metric_state)
+    partial_step = partial(edge_weight_gae.train_step, metric_state=metric_state, arch_only=arch_only)
     func = jax.jit(partial_step)
 
     for _ in range(3):
