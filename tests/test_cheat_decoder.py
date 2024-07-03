@@ -198,17 +198,17 @@ def test_grad_cheat_decoder(seed):
     a_graphs = cheat_decoder.indexify_graph(a_graphs)
     b_graphs = jraph.unbatch(a_graphs)
     c_graphs = jraph.batch(b_graphs[::2])
-    pad_senders, pad_receivers, pad_edges, pad_nodes = cheat_decoder.batch_graph_arrays(c_graphs, model.max_edges, model.max_nodes)
+    pad_graphs = cheat_decoder.batch_graph_arrays(c_graphs, model.max_edges, model.max_nodes)
 
     def loss_fn(params, state, x):
         new_graphs = state.apply_fn(params, x)
 
-        loss = jnp.mean(jnp.abs(new_graphs.nodes - pad_nodes))
-        loss += jnp.mean(jnp.abs(new_graphs.edges - pad_edges))
-        loss += jnp.mean((new_graphs.senders - pad_senders) ** 2)
-        loss += jnp.mean((new_graphs.receivers - pad_receivers) ** 2)
-        loss += jnp.max(jnp.abs(new_graphs.senders - pad_senders))
-        loss += jnp.max(jnp.abs(new_graphs.receivers - pad_receivers))
+        diff_graph = cheat_decoder.make_abs_diff_graph(new_graphs, pad_graphs)
+
+        loss = jnp.mean(diff_graph.nodes) + jnp.max(diff_graph.nodes)
+        loss += jnp.mean(diff_graph.edges) + jnp.max(diff_graph.edges)
+        loss += jnp.mean(diff_graph.senders) + jnp.max(diff_graph.senders)
+        loss += jnp.mean(diff_graph.receivers) + jnp.max(diff_graph.receivers)
 
         return loss
 

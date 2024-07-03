@@ -1,4 +1,5 @@
-from typing import Sequence, Any
+from typing import Sequence, Any, NamedTuple
+from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
@@ -21,10 +22,47 @@ def indexify_graph(graph):
     return graph
 
 
+class ReferenceGraph(NamedTuple):
+    nodes: jnp.ndarray
+    edges: jnp.ndarray
+    senders: jnp.ndarray
+    receivers: jnp.ndarray
+
+def make_diff_graph(graph_a, graph_b, skip_graphs=1):
+    result = ReferenceGraph(nodes = graph_a.nodes[:-skip_graphs] - graph_b.nodes[:-skip_graphs],
+                            edges = graph_a.edges[:-skip_graphs] - graph_b.edges[:-skip_graphs],
+                            senders = graph_a.senders[:-skip_graphs] - graph_b.senders[:-skip_graphs],
+                            receivers = graph_a.receivers[:-skip_graphs] - graph_b.receivers[:-skip_graphs],
+                            )
+    return result
+
+def make_abs_graph(graph):
+    result = ReferenceGraph(nodes = jnp.abs(graph.nodes),
+                            edges = jnp.abs(graph.edges),
+                            senders = jnp.abs(graph.senders),
+                            receivers = jnp.abs(graph.receivers),
+                            )
+    return result
+
+def make_square_graph(graph):
+    result = ReferenceGraph(nodes = graph.nodes**2,
+                            edges = graph.edges**2,
+                            senders = graph.senders**2,
+                            receivers = graph.receivers**2,
+                            )
+    return result
+
+
+def make_abs_diff_graph(graph_a, graph_b, skip_graphs=1):
+    return make_abs_graph(make_diff_graph(graph_a, graph_b, skip_graphs))
+
+def make_square_diff_graph(graph_a, graph_b, skip_graphs=1):
+    return make_square_graph(make_diff_graph(graph_a, graph_b, skip_graphs))
+
+
 def batch_graph_arrays(graph, max_edges:int, max_nodes:int):
-    max_num_edges = int(max_edges)
     def mask_builder(n_edge, cumsum, node_cumsum):
-        mask = jnp.arange(max_num_edges) < n_edge
+        mask = jnp.arange(max_edges) < n_edge
         pad_widths = ((0, max(0, max_edges-graph.edges.shape[0])), (0, 0))
         pad_edges = jnp.pad(graph.edges, pad_widths)
         pad_senders = jnp.pad(graph.senders, pad_widths[0])
@@ -63,7 +101,6 @@ def batch_graph_arrays(graph, max_edges:int, max_nodes:int):
         pad_widths = ((0, max(0, max_nodes-graph.nodes.shape[0])), (0, 0))
         pad_nodes = jnp.pad(graph.nodes, pad_widths)
         nodes = jnp.roll(pad_nodes, -tmp_cumsum, axis=0)[:max_nodes]
-        print(mask.shape, nodes.shape, graph.nodes.shape)
         nodes = mask[:,None] * nodes
         return nodes
     node_cumsum = jnp.concatenate((jnp.zeros((1,)), jnp.cumsum(graph.n_node[:-1], dtype=int) ))
@@ -71,7 +108,9 @@ def batch_graph_arrays(graph, max_edges:int, max_nodes:int):
 
     nodes = nodes.reshape((nodes.shape[0]*nodes.shape[1], nodes.shape[2]))
 
-    return senders, receivers, edges, nodes
+    ref_graph = ReferenceGraph(nodes=nodes, edges=edges, senders=senders, receivers=receivers)
+    return ref_graph
+
 
 class CheatDecoder(nn.Module):
     max_nodes: int
@@ -85,15 +124,15 @@ class CheatDecoder(nn.Module):
         self._mlp_kwargs = self.mlp_kwargs
         if self._mlp_kwargs is None:
             self._mlp_kwargs = {}
-        self.arch_mlp = MLP(self.arch_stack + (2 * self.max_edges,), **self._mlp_kwargs)
-        self.node_mlp = MLP(self.node_stack[:-1] + (self.max_nodes * self.node_stack[-1],), **self._mlp_kwargs)
-        self.edge_mlp = MLP(self.edge_stack[:-1] + (self.max_edges * self.edge_stack[-1],), **self._mlp_kwargs)
+        self.arch_mlp = MLP(self.arch_stack + (2 * int(self.max_edges),), **self._mlp_kwargs)
+        self.node_mlp = MLP(self.node_stack[:-1] + (int(self.max_nodes) * int(self.node_stack[-1]),), **self._mlp_kwargs)
+        self.edge_mlp = MLP(self.edge_stack[:-1] + (int(self.max_edges) * int(self.edge_stack[-1]),), **self._mlp_kwargs)
 
         def _get_send_recv(x):
             n_edge = x[-1]
             n_node = x[-2]
 
-            send_recv = self.arch_mlp(x).reshape((2, self.max_edges))
+            send_recv = self.arch_mlp(x).reshape((2, int(self.max_edges)))
 
             # Mask out the invalid edges
             logic = jnp.arange(self.max_edges) < n_edge
@@ -113,7 +152,7 @@ class CheatDecoder(nn.Module):
             n_node = x[-2]
             sub_x = x[:-2]
 
-            nodes = self.node_mlp(sub_x).reshape((self.max_nodes, self.node_stack[-1]))
+            nodes = self.node_mlp(sub_x).reshape((int(self.max_nodes), int(self.node_stack[-1])))
             logic = jnp.arange(self.max_nodes) < n_node
             nodes = nodes * logic[:, None]
             return nodes
@@ -124,7 +163,7 @@ class CheatDecoder(nn.Module):
             n_edge = x[-1]
             sub_x = x[:-2]
 
-            edges = self.edge_mlp(sub_x).reshape(self.max_edges, self.edge_stack[-1])
+            edges = self.edge_mlp(sub_x).reshape(int(self.max_edges), int(self.edge_stack[-1]))
             logic = jnp.arange(self.max_edges) < n_edge
             edges = edges * logic[:, None]
 
