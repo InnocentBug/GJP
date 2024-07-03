@@ -220,7 +220,7 @@ def test_grad_cheat_decoder(seed):
         assert jnp.sum(jnp.abs(leaf)) > 0
 
     def train_step(state, x):
-        a_graphs = model.apply(state.params, x)
+        model.apply(state.params, x)
 
         val, grad = jax.value_and_grad(loss_fn)(state.params, state, x)
         state = state.apply_gradients(grads=grad)

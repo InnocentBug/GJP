@@ -1,5 +1,4 @@
-from typing import Sequence, Any, NamedTuple
-from dataclasses import dataclass
+from typing import Any, NamedTuple, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -28,42 +27,49 @@ class ReferenceGraph(NamedTuple):
     senders: jnp.ndarray
     receivers: jnp.ndarray
 
+
 def make_diff_graph(graph_a, graph_b, skip_graphs=1):
-    result = ReferenceGraph(nodes = graph_a.nodes[:-skip_graphs] - graph_b.nodes[:-skip_graphs],
-                            edges = graph_a.edges[:-skip_graphs] - graph_b.edges[:-skip_graphs],
-                            senders = graph_a.senders[:-skip_graphs] - graph_b.senders[:-skip_graphs],
-                            receivers = graph_a.receivers[:-skip_graphs] - graph_b.receivers[:-skip_graphs],
-                            )
+    result = ReferenceGraph(
+        nodes=graph_a.nodes[:-skip_graphs] - graph_b.nodes[:-skip_graphs],
+        edges=graph_a.edges[:-skip_graphs] - graph_b.edges[:-skip_graphs],
+        senders=graph_a.senders[:-skip_graphs] - graph_b.senders[:-skip_graphs],
+        receivers=graph_a.receivers[:-skip_graphs] - graph_b.receivers[:-skip_graphs],
+    )
     return result
+
 
 def make_abs_graph(graph):
-    result = ReferenceGraph(nodes = jnp.abs(graph.nodes),
-                            edges = jnp.abs(graph.edges),
-                            senders = jnp.abs(graph.senders),
-                            receivers = jnp.abs(graph.receivers),
-                            )
+    result = ReferenceGraph(
+        nodes=jnp.abs(graph.nodes),
+        edges=jnp.abs(graph.edges),
+        senders=jnp.abs(graph.senders),
+        receivers=jnp.abs(graph.receivers),
+    )
     return result
 
+
 def make_square_graph(graph):
-    result = ReferenceGraph(nodes = graph.nodes**2,
-                            edges = graph.edges**2,
-                            senders = graph.senders**2,
-                            receivers = graph.receivers**2,
-                            )
+    result = ReferenceGraph(
+        nodes=graph.nodes**2,
+        edges=graph.edges**2,
+        senders=graph.senders**2,
+        receivers=graph.receivers**2,
+    )
     return result
 
 
 def make_abs_diff_graph(graph_a, graph_b, skip_graphs=1):
     return make_abs_graph(make_diff_graph(graph_a, graph_b, skip_graphs))
 
+
 def make_square_diff_graph(graph_a, graph_b, skip_graphs=1):
     return make_square_graph(make_diff_graph(graph_a, graph_b, skip_graphs))
 
 
-def batch_graph_arrays(graph, max_edges:int, max_nodes:int):
+def batch_graph_arrays(graph, max_edges: int, max_nodes: int):
     def mask_builder(n_edge, cumsum, node_cumsum):
         mask = jnp.arange(max_edges) < n_edge
-        pad_widths = ((0, max(0, max_edges-graph.edges.shape[0])), (0, 0))
+        pad_widths = ((0, max(0, max_edges - graph.edges.shape[0])), (0, 0))
         pad_edges = jnp.pad(graph.edges, pad_widths)
         pad_senders = jnp.pad(graph.senders, pad_widths[0])
         pad_receivers = jnp.pad(graph.receivers, pad_widths[0])
@@ -74,11 +80,12 @@ def batch_graph_arrays(graph, max_edges:int, max_nodes:int):
         receivers = mask * receivers
 
         edges = jnp.roll(pad_edges, -cumsum, axis=0)[:max_edges]
-        edges = mask[:,None] * edges
+        edges = mask[:, None] * edges
 
         return mask, senders, receivers, edges
+
     cumsum = jnp.concatenate((jnp.zeros((1,)), jnp.cumsum(graph.n_edge[:-1], dtype=int)))
-    node_cumsum = jnp.concatenate((jnp.zeros((1,)), jnp.cumsum(graph.n_node[:-1], dtype=int) ))
+    node_cumsum = jnp.concatenate((jnp.zeros((1,)), jnp.cumsum(graph.n_node[:-1], dtype=int)))
 
     mask, senders, receivers, edges = jax.vmap(mask_builder)(graph.n_edge, cumsum, node_cumsum)
     fill_array = jnp.repeat(graph.n_node, max_edges).reshape((graph.n_edge.shape[0], max_edges))
@@ -91,22 +98,23 @@ def batch_graph_arrays(graph, max_edges:int, max_nodes:int):
     senders = senders.flatten()
     receivers = receivers.flatten()
     fill_array = fill_array.flatten()
-    edges = edges.reshape((edges.shape[0]*edges.shape[1], edges.shape[2]))
+    edges = edges.reshape((edges.shape[0] * edges.shape[1], edges.shape[2]))
 
-    senders = senders * mask + (1-mask) * fill_array
-    receivers = receivers * mask + (1-mask) * fill_array
+    senders = senders * mask + (1 - mask) * fill_array
+    receivers = receivers * mask + (1 - mask) * fill_array
 
     def node_builder(n_node, tmp_cumsum):
         mask = jnp.arange(max_nodes) < n_node
-        pad_widths = ((0, max(0, max_nodes-graph.nodes.shape[0])), (0, 0))
+        pad_widths = ((0, max(0, max_nodes - graph.nodes.shape[0])), (0, 0))
         pad_nodes = jnp.pad(graph.nodes, pad_widths)
         nodes = jnp.roll(pad_nodes, -tmp_cumsum, axis=0)[:max_nodes]
-        nodes = mask[:,None] * nodes
+        nodes = mask[:, None] * nodes
         return nodes
-    node_cumsum = jnp.concatenate((jnp.zeros((1,)), jnp.cumsum(graph.n_node[:-1], dtype=int) ))
+
+    node_cumsum = jnp.concatenate((jnp.zeros((1,)), jnp.cumsum(graph.n_node[:-1], dtype=int)))
     nodes = jax.vmap(node_builder)(graph.n_node, node_cumsum)
 
-    nodes = nodes.reshape((nodes.shape[0]*nodes.shape[1], nodes.shape[2]))
+    nodes = nodes.reshape((nodes.shape[0] * nodes.shape[1], nodes.shape[2]))
 
     ref_graph = ReferenceGraph(nodes=nodes, edges=edges, senders=senders, receivers=receivers)
     return ref_graph
