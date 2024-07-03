@@ -5,20 +5,9 @@ import jax.numpy as jnp
 import jraph
 import optax
 import pytest
+from utils import compare_graphs
 
 from gjp import metric_util, mpg
-
-
-def compare_graphs(a, b, node_end, edge_end):
-    assert jnp.allclose(a.senders, b.senders)
-    assert jnp.allclose(a.receivers, b.receivers)
-    assert jnp.allclose(a.n_edge, b.n_edge)
-    assert jnp.allclose(a.n_node, b.n_node)
-
-    if node_end:
-        assert a.nodes.shape == b.nodes.shape[:-1] + (node_end,)
-    if edge_end:
-        assert a.edges.shape == b.edges.shape[:-1] + (edge_end,)
 
 
 @pytest.mark.parametrize("node_stack, edge_stack, attention_stack, global_stack", [(None, None, None, None), ([2, 3, 5], [3, 4], [1, 12, 2, 4], [12, 54, 2])])
