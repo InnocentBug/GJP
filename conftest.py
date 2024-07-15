@@ -12,6 +12,8 @@ from gjp import GraphData, batch_list, convert_to_jraph, metric_util
 def ensure_tempfile():
     original_path = os.getcwd()
     jax.config.update("jax_platform_name", "cpu")
+    jax.config.update("jax_debug_nans", True)
+    jax.config.update("jax_experimental_unsafe_xla_runtime_errors", True)
     with tempfile.TemporaryDirectory() as tmp_path:
         os.chdir(tmp_path)
         yield original_path, tmp_path

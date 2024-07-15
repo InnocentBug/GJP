@@ -42,8 +42,9 @@ class EdgeWeightGAE(nn.Module):
 
     def __call__(self, x, gumbel_temperature):
         mu_wo_noise = self.encoder(x).globals
-        log_sigma_wo_noise = self.sigma_encoder(x).globals
+        log_sigma_wo_noise = 10 * jnp.tanh(self.sigma_encoder(x).globals / 10)
         sigma_wo_noise = jnp.exp(log_sigma_wo_noise)
+
         rng = self.make_rng("reparametrize")
         eps = jax.random.normal(rng, mu_wo_noise.shape)
         z_wo_node = mu_wo_noise + sigma_wo_noise * eps  # Reparameterization trick
@@ -51,6 +52,7 @@ class EdgeWeightGAE(nn.Module):
         # Add the node and edge info after adding noise
         z = jnp.vstack((z_wo_node.transpose(), x.n_node, x.n_edge)).transpose()
         reconstructed, edge_weights = self.decoder(z, gumbel_temperature)
+        # jax.debug.print("gae forward {} {} {} {} {}", jnp.sum(sigma_wo_noise), jnp.sum(mu_wo_noise), jnp.sum(eps), jnp.sum(z_wo_node), jnp.sum(edge_weights))
         return reconstructed, edge_weights, mu_wo_noise, log_sigma_wo_noise
 
     def decode(self, z, gumbel_temperature, gumbel_rng):
@@ -59,7 +61,7 @@ class EdgeWeightGAE(nn.Module):
     def encode(self, x):
         return self.encoder(x)
 
-    def encode_decode(self, x, gumbel_rng):
+    def encode_decode(self, x, gumbel_temperature, gumbel_rng):
         mu_wo_node = self.encoder(x).globals
         # Add the node and edge info after adding noise
         z = jnp.vstack((mu_wo_node.transpose(), x.n_node, x.n_edge)).transpose()
@@ -82,13 +84,13 @@ def pre_loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel
     out_metric = metric_state.apply_fn(metric_state.params, out_graphs, edge_weights).globals[::2]
     out_metric = out_metric[:-1]
 
-    recon_loss = jnp.sqrt(jnp.mean((in_metric - out_metric) ** 2))
+    recon_loss = jnp.mean((in_metric - out_metric) ** 2)
     kl_divergence = -0.5 * jnp.sum(1 + log_sigma[:-1] - jnp.square(mu[:-1]) - jnp.exp(log_sigma[:-1]))
 
     return recon_loss, kl_divergence
 
 
-def loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature, arch_only, recon_boost=1000.0):
+def loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature, arch_only, recon_boost=10.0):
     recon_loss, kl_divergence = pre_loss_function(params, train_state, in_graphs, rngs, metric_state, gumbel_temperature, arch_only)
 
     return recon_boost * recon_loss + kl_divergence

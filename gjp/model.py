@@ -41,7 +41,7 @@ class MLP(nn.Module):
     def __call__(self, inputs):
         x = inputs
         for size in self.feature_sizes:
-            x = nn.Dense(features=size)(x)
+            x = nn.Dense(features=size, bias_init=nn.initializers.normal())(x)
             x = self.activation(x)
             x = nn.Dropout(rate=self.dropout_rate, deterministic=self.deterministic)(x)
             # x = nn.LayerNorm()(x)

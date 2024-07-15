@@ -113,7 +113,7 @@ class EdgeWeightDecoder(nn.Module):
             get_pre_mask = jax.vmap(_get_pre_mask)
             pre_mask = get_pre_mask(x)
 
-            edge_weight = nn.sigmoid(edge_weight)
+            edge_weight = 0.5 * (jnp.tanh(edge_weight / 2) + 1)
 
             # Mask out invalid edges of the buffer graph
             edge_weight = edge_weight * (1 - pre_mask)
